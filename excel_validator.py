@@ -79,38 +79,56 @@ def process_excel_with_validation(
     # 分组计算
     group_stats = df.groupby(group_columns).apply(check_group).reset_index()
 
-    # 4. 合并分组状态到原始数据
-    # 重命名分组统计列以便合并
-    group_stats.rename(columns={'组状态': '验证状态'}, inplace=True)
+    # 4. 处理输出列选择
+    # 确保验证状态在输出列中
+    if output_columns is not None:
+        # 确保分组列在输出列中
+        final_output_columns = group_columns.copy()
+        # 添加其他指定的输出列
+        for col in output_columns:
+            if col not in final_output_columns and col != '验证状态':
+                final_output_columns.append(col)
+        # 添加验证状态列
+        if '验证状态' not in final_output_columns:
+            final_output_columns.append('验证状态')
+    else:
+        # 如果没有指定输出列，使用所有列
+        final_output_columns = group_stats.columns.tolist()
 
-    # 合并数据
-    result_df = df.merge(
-        group_stats[group_columns + ['验证状态']],
-        on=group_columns,
-        how='left'
-    )
-
-    # 5. 选择输出列
-    final_result = result_df[output_columns].copy()
+    # 5. 选择最终的组级别数据（只保留汇总数据）
+    final_result = group_stats[final_output_columns].copy()
 
     # 6. 输出到Excel
     print(f"正在输出结果到 {output_file}...")
 
     # 创建Excel writer，支持多个sheet
     with pd.ExcelWriter(output_file) as writer:
-        # 主数据
+        # 验证结果 - 组级别的汇总数据
         final_result.to_excel(writer, sheet_name='验证结果', index=False)
 
-        # 分组统计摘要
+        # 分组统计摘要 - 更详细的统计信息
         group_summary = group_stats[group_columns + ['验证状态', '正常行数', '异常行数', '总行数', '异常率']]
         group_summary.to_excel(writer, sheet_name='分组统计', index=False)
 
-        # 异常详情（可选）
-        abnormal_data = result_df[~result_df['行是否正常']]
-        if not abnormal_data.empty:
-            abnormal_cols = output_columns.copy()
-            abnormal_cols.append('行是否正常')
-            abnormal_data[abnormal_cols].to_excel(writer, sheet_name='异常详情', index=False)
+        # 异常详情（如果原始数据可用）
+        if '行是否正常' in df.columns:
+            abnormal_data = df[~df['行是否正常']]
+            if not abnormal_data.empty:
+                # 使用输出列和比较列创建异常详情
+                abnormal_cols = group_columns.copy()
+                if output_columns:
+                    for col in output_columns:
+                        if col not in abnormal_cols and col != '验证状态':
+                            abnormal_cols.append(col)
+                # 添加比较列
+                for col in compare_columns:
+                    if col not in abnormal_cols:
+                        abnormal_cols.append(col)
+                # 添加状态列
+                if '行是否正常' not in abnormal_cols:
+                    abnormal_cols.append('行是否正常')
+
+                abnormal_data[abnormal_cols].to_excel(writer, sheet_name='异常详情', index=False)
 
     print(f"文件已保存到: {output_file}")
     return final_result
@@ -124,7 +142,7 @@ if __name__ == "__main__":
         sheet_name='Sheet1',
         group_columns=['部门', '月份'],
         compare_columns=['计划数量', '实际数量'],
-        output_columns=['部门', '月份', '产品名称', '计划数量', '实际数量'],
+        output_columns=['部门', '月份', '产品名称'],  # 注意：输出列数会等于组数量，不是原始行数
         output_file='validation_result.xlsx'
     )
 
@@ -142,6 +160,9 @@ if __name__ == "__main__":
     for file in os.listdir('.'):
         if file.endswith('.xlsx'):
             print(f"- {file}")
+
+    # 查看输出结果（验证结果sheet只有组数量行）
+    print(f"\n验证结果包含 {len(result)} 行数据（等于组数量）")
 
 
 # 使用说明
