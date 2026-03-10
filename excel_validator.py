@@ -33,13 +33,14 @@ def process_excel_with_validation(
 
     # 1. 读取Excel数据，保持原始格式
     print(f"正在读取 {input_file} 的 {sheet_name} 工作表...")
-    df = pd.read_excel(input_file, sheet_name=sheet_name)
 
-    # 如果指定了字符串列，将这些列转换为字符串以保持格式
+    # 构建dtype字典，保持字符串格式
+    dtype_dict = {}
     if string_columns:
         for col in string_columns:
-            if col in df.columns:
-                df[col] = df[col].astype(str)
+            dtype_dict[col] = 'string'
+
+    df = pd.read_excel(input_file, sheet_name=sheet_name, dtype=dtype_dict)
 
     # 2. 数据验证检查
     print("正在验证数据...")
@@ -54,6 +55,14 @@ def process_excel_with_validation(
         missing_cols = [col for col in compare_columns if col not in df.columns]
         raise ValueError(f"比较列不存在: {missing_cols}")
 
+    # 确保字符串列保持字符串格式
+    if string_columns:
+        for col in string_columns:
+            if col in df.columns:
+                # 使用pandas的string类型来保持前导零
+                df[col] = df[col].astype('string')
+
+    # 逐行比较两列数据
     # 逐行比较两列数据
     df['行是否正常'] = (df[col1] == df[col2])
 
@@ -164,28 +173,71 @@ def process_excel_with_validation(
         if '行是否正常' in df.columns:
             abnormal_data = df[~df['行是否正常']]
             if not abnormal_data.empty:
-                # 使用输出列和比较列创建异常详情
+                # 创建异常详情列列表
+                # 首先添加分组列
                 abnormal_cols = group_columns.copy()
-                if output_columns:
-                    for col in output_columns:
-                        if col not in abnormal_cols and col != '验证状态':
+
+                # 添加原始数据中的重要列（特别是字符串格式需要保持的列）
+                if string_columns:
+                    for col in string_columns:
+                        if col in abnormal_data.columns and col not in abnormal_cols:
                             abnormal_cols.append(col)
+
                 # 添加比较列
                 for col in compare_columns:
                     if col not in abnormal_cols:
                         abnormal_cols.append(col)
+
                 # 添加状态列
                 if '行是否正常' not in abnormal_cols:
                     abnormal_cols.append('行是否正常')
 
-                # 确保异常详情中的字符串列格式正确
-                abnormal_data_copy = abnormal_data[abnormal_cols].copy()
+                # 只保留在原始数据中存在的列
+                valid_cols = [col for col in abnormal_cols if col in abnormal_data.columns]
+                abnormal_data_copy = abnormal_data[valid_cols].copy()
+
+                # 应用字符串格式 - 使用更可靠的方法保持字符串格式
                 if string_columns:
                     for col in string_columns:
                         if col in abnormal_data_copy.columns:
-                            abnormal_data_copy[col] = abnormal_data_copy[col].astype(str)
+                            # 使用pandas的string类型来保持前导零
+                            abnormal_data_copy[col] = abnormal_data_copy[col].astype('string')
+                            # 从原始数据获取正确的字符串值
+                            original_values = abnormal_data[col].tolist()
+                            for i in range(len(abnormal_data_copy)):
+                                if i < len(original_values) and pd.notna(original_values[i]):
+                                    abnormal_data_copy.iloc[i, abnormal_data_copy.columns.get_loc(col)] = str(original_values[i])
 
-                abnormal_data_copy.to_excel(writer, sheet_name='异常详情', index=False)
+                # 直接使用处理好的数据创建临时DataFrame
+                temp_abnormal_data = abnormal_data_copy.copy()
+
+                # 使用保存好格式的数据写入Excel
+                temp_abnormal_data.to_excel(writer, sheet_name='异常详情', index=False)
+
+                # 获取工作表进行额外配置
+                ws = writer.sheets['异常详情']
+
+                # 为字符串列设置格式，确保前导零不被去掉
+                if string_columns:
+                    for col_idx, col_name in enumerate(temp_abnormal_data.columns):
+                        if col_name in string_columns:
+                            # 设置列宽，确保内容显示完整
+                            from openpyxl.utils import get_column_letter
+                            ws.column_dimensions[get_column_letter(col_idx + 1)].width = 15
+
+                            # 设置整个列的格式为文本
+                            for row in range(1, len(temp_abnormal_data) + 2):  # 包含标题行
+                                cell = ws.cell(row=row, column=col_idx + 1)
+                                # 设置单元格格式为文本，保持前导零
+                                cell.number_format = '@'
+
+                            # 确保数据是字符串格式
+                            for row_idx in range(len(temp_abnormal_data)):
+                                row_idx_excel = row_idx + 2  # Excel行号（从2开始）
+                                cell_value = temp_abnormal_data.iloc[row_idx, col_idx]
+                                if pd.notna(cell_value):
+                                    # 直接设置字符串值
+                                    ws.cell(row=row_idx_excel, column=col_idx + 1).value = str(cell_value)
 
     print(f"文件已保存到: {output_file}")
     return final_result
