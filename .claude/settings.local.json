@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(python test_standard.py)",
+      "Bash(git add excel_validator.py test_standard.py test_abnormal_detail.py)",
+      "Bash(git add .)"
     ]
   }
 }

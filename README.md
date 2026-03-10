@@ -11,14 +11,46 @@
 - **多sheet输出**：
   - 验证结果：带验证状态的完整数据
   - 分组统计：各组的汇总统计
-  - 异常详情：所有异常行的详细信息
-- **灵活配置**：可自定义输出列和输出文件名
+  - 异常详情：包含所有行（正常和异常），并用颜色标记异常行
+- **灵活配置**：可自定义输出列、输出文件名、异常详情中的列
+- **字符串格式保持**：保持前导零和特殊字符串格式
+- **异常行标记**：异常行有红色背景色标记
 
 ## 安装要求
 
 ```bash
 pip install pandas openpyxl
 ```
+
+## 新功能说明
+
+### 1. 异常详情包含所有行
+异常详情sheet现在包含所有行（正常和异常），并通过添加"是否异常"列来标记每行的状态：
+- `是`（或True）：该行数据异常
+- `否`（或False）：该行数据正常
+
+异常行会有红色背景标记，方便快速识别。
+
+### 2. 可配置异常详情中的列
+通过`abnormal_detail_columns`参数，可以指定异常详情中要显示哪些原表列：
+
+```python
+# 指定异常详情中只显示特定列
+result = process_excel_with_validation(
+    input_file='data.xlsx',
+    sheet_name='Sheet1',
+    group_columns=['部门'],
+    compare_columns=['计划金额', '实际金额'],
+    abnormal_detail_columns=['订单号', '产品代码', '计划金额', '实际金额'],  # 只显示这些列
+    string_columns=['订单号', '产品代码']
+)
+```
+
+如果不指定`abnormal_detail_columns`，系统会自动包含：
+- 所有分组列
+- 所有字符串列（通过`string_columns`指定）
+- 所有比较列
+- 状态列（行是否正常、是否异常）
 
 ## 使用方法
 
@@ -37,6 +69,43 @@ result = process_excel_with_validation(
 )
 ```
 
+### 使用新功能示例
+
+```python
+# 示例1：使用新功能 - 异常详情包含所有行，并配置显示特定列
+from excel_validator import process_excel_with_validation
+
+# 创建测试数据
+data = {
+    '订单号': ['001', '002', '003', '004'],
+    '产品代码': ['A01', 'A02', 'A01', 'A03'],
+    '部门': ['销售部', '销售部', '市场部', '市场部'],
+    '计划金额': [1000, 2000, 1500, 1800],
+    '实际金额': [1000, 2100, 1500, 1800]  # 第2行有异常
+}
+
+df = pd.DataFrame(data)
+df.to_excel('test_data.xlsx', index=False)
+
+# 运行验证，并指定异常详情中要显示的列
+result = process_excel_with_validation(
+    input_file='test_data.xlsx',
+    sheet_name='Sheet1',
+    group_columns=['部门'],
+    compare_columns=['计划金额', '实际金额'],
+    output_columns=['部门', '验证状态', '总行数'],
+    output_file='enhanced_result.xlsx',
+    string_columns=['订单号', '产品代码'],
+    abnormal_detail_columns=['订单号', '产品代码', '计划金额', '实际金额']  # 只显示这些列
+)
+
+# 输出结果：
+# 1. 验证结果：部门级别的汇总
+# 2. 分组统计：详细的分组统计
+# 3. 异常详情：包含所有行（正常和异常），标记异常行，只显示指定的列
+```
+```
+
 ### 参数说明
 
 | 参数 | 类型 | 必需 | 描述 |
@@ -48,6 +117,7 @@ result = process_excel_with_validation(
 | output_columns | List[str] | 否 | 输出到新Excel的列名列表 |
 | output_file | str | 否 | 输出文件名（默认validation_result.xlsx） |
 | string_columns | List[str] | 否 | 需要保持为字符串格式的列名列表（避免"001"变成1） |
+| abnormal_detail_columns | List[str] | 否 | 异常详情中需要显示的原表列名列表。如果为None，则自动包含分组列、比较列和字符串列。 |
 
 ### output_columns 参数详解
 
