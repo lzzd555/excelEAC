@@ -47,6 +47,7 @@ result = process_excel_with_validation(
 | compare_columns | List[str] | 是 | 需要比较是否相等的列名列表（必须是2列） |
 | output_columns | List[str] | 否 | 输出到新Excel的列名列表（默认所有列） |
 | output_file | str | 否 | 输出文件名（默认validation_result.xlsx） |
+| string_columns | List[str] | 否 | 需要保持为字符串格式的列名列表（避免"001"变成1） |
 
 ### 输出文件结构
 
@@ -64,6 +65,43 @@ result = process_excel_with_validation(
 3. **异常详情**
    - 所有不符合条件的数据行
    - 便于快速定位问题数据
+
+## 数据格式保持
+
+### 问题：数据格式丢失
+
+当处理包含编号、代码等数据时，pandas可能会改变数据格式：
+- `001` → `1` （前导零丢失）
+- `00123` → `123` （前导零丢失）
+
+### 解决方案：使用 `string_columns` 参数
+
+```python
+# 保持订单号、产品代码等数据的原始格式
+result = process_excel_with_validation(
+    input_file='orders.xlsx',
+    sheet_name='订单数据',
+    group_columns=['客户ID'],
+    compare_columns=['计划金额', '实际金额'],
+    output_columns=['客户ID', '订单号', '产品代码', '计划金额', '实际金额'],
+    string_columns=['订单号', '产品代码']  # 这些列将保持字符串格式
+)
+```
+
+### 适用场景
+
+- 订单编号：`ORD001` 保持为 `ORD001`
+- 产品代码：`P00123` 保持为 `P00123`
+- 工单编号：`WO2023001` 保持为 `WO2023001`
+- 账户编号：`ACC001` 保持为 `ACC001`
+- 任何需要保持前导零或固定格式的数据
+
+### 技术实现
+
+- 使用 `string_columns` 参数指定需要保持字符串格式的列
+- 读取时将这些列转换为字符串
+- 写入时保持字符串格式，使用openpyxl引擎
+- 避免pandas的自动类型转换
 
 ## 使用示例
 
@@ -106,6 +144,21 @@ result = process_excel_with_validation(
 )
 ```
 
+### 示例4：保持数据格式（解决"001"变成1的问题）
+
+```python
+# 处理订单数据，保持订单号和产品代码的原始格式
+result = process_excel_with_validation(
+    input_file='orders.xlsx',
+    sheet_name='订单数据',
+    group_columns=['客户ID'],
+    compare_columns=['计划金额', '实际金额'],
+    output_columns=['客户ID', '订单号', '产品代码', '计划金额', '实际金额'],
+    string_columns=['订单号', '产品代码']  # 重要：保持原始格式
+)
+# 结果：订单号"00123"会保持为"00123"而不是变成123
+```
+
 ## 注意事项
 
 1. 确保输入Excel文件存在且可读
@@ -113,6 +166,8 @@ result = process_excel_with_validation(
 3. 输出文件会自动保存在运行脚本的当前文件夹
 4. compare_columns参数必须包含恰好2个列名
 5. 如果某组中所有行都正常，则该组状态为"正常"，否则为"异常"
+6. **重要**：对于需要保持格式（如"001"）的列，请使用 `string_columns` 参数指定
+7. 输出的是组级别的汇总数据，行数等于组数量，不是原始数据行数
 
 ## 代码结构
 

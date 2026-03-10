@@ -8,7 +8,8 @@ def process_excel_with_validation(
     group_columns: List[str],
     compare_columns: List[str],
     output_columns: Optional[List[str]] = None,
-    output_file: str = 'validation_result.xlsx'
+    output_file: str = 'validation_result.xlsx',
+    string_columns: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     处理Excel文件并进行数据验证
@@ -20,6 +21,7 @@ def process_excel_with_validation(
         compare_columns: 需要比较是否相等的列名列表（必须是2列）
         output_columns: 输出到新Excel的列名列表（包含分组状态列）
         output_file: 输出文件名
+        string_columns: 需要保持为字符串格式的列名列表（避免"001"变成1）
 
     返回:
         处理后的DataFrame
@@ -29,9 +31,15 @@ def process_excel_with_validation(
         # 如果是相对路径，确保输出到当前文件夹
         output_file = os.path.join(os.getcwd(), output_file)
 
-    # 1. 读取Excel数据
+    # 1. 读取Excel数据，保持原始格式
     print(f"正在读取 {input_file} 的 {sheet_name} 工作表...")
     df = pd.read_excel(input_file, sheet_name=sheet_name)
+
+    # 如果指定了字符串列，将这些列转换为字符串以保持格式
+    if string_columns:
+        for col in string_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(str)
 
     # 如果没有指定输出列，默认使用所有列
     if output_columns is None:
@@ -102,13 +110,21 @@ def process_excel_with_validation(
     # 6. 选择最终的组级别数据（只保留汇总数据）
     final_result = group_stats[final_output_columns].copy()
 
-    # 7. 输出到Excel
+    # 7. 输出到Excel，保持原始格式
     print(f"正在输出结果到 {output_file}...")
 
-    # 创建Excel writer，支持多个sheet
-    with pd.ExcelWriter(output_file) as writer:
+    # 创建Excel writer，使用openpyxl保持格式
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         # 验证结果 - 组级别的汇总数据
-        final_result.to_excel(writer, sheet_name='验证结果', index=False)
+        if string_columns:
+            # 对于字符串列，先转换为字符串再写入
+            final_result_copy = final_result.copy()
+            for col in string_columns:
+                if col in final_result_copy.columns:
+                    final_result_copy[col] = final_result_copy[col].astype(str)
+            final_result_copy.to_excel(writer, sheet_name='验证结果', index=False)
+        else:
+            final_result.to_excel(writer, sheet_name='验证结果', index=False)
 
         # 分组统计摘要 - 更详细的统计信息
         group_summary = group_stats[group_columns + ['验证状态', '正常行数', '异常行数', '总行数', '异常率']]
@@ -159,7 +175,18 @@ if __name__ == "__main__":
         output_file='department_validation.xlsx'  # 会自动保存到当前文件夹
     )
 
-    # 示例3：查看当前文件夹的输出文件
+    # 示例3：保持数据格式（避免"001"变成1）
+    result3 = process_excel_with_validation(
+        input_file='data.xlsx',
+        sheet_name='Sheet1',
+        group_columns=['部门'],
+        compare_columns=['计划值', '实际值'],
+        output_columns=['部门', '订单号', '产品代码'],
+        output_file='formatted_result.xlsx',
+        string_columns=['订单号', '产品代码']  # 这些列将保持字符串格式
+    )
+
+    # 示例4：查看当前文件夹的输出文件
     print("\n当前文件夹中的输出文件:")
     for file in os.listdir('.'):
         if file.endswith('.xlsx'):
@@ -182,7 +209,8 @@ if __name__ == "__main__":
        group_columns=['部门'],             # 分组列（可以多列）
        compare_columns=['计划值', '实际值'], # 需要比较的两列
        output_columns=['部门', '产品', '计划值', '实际值'], # 输出列（可选）
-       output_file='result.xlsx'           # 输出文件名（可选）
+       output_file='result.xlsx',          # 输出文件名（可选）
+       string_columns=['订单号']           # 保持为字符串格式的列（可选）
    )
 
 2. 参数说明：
@@ -192,15 +220,22 @@ if __name__ == "__main__":
    - compare_columns: 需要比较是否相等的列名列表（必须是2列）
    - output_columns: 输出到新Excel的列名列表（可选，默认所有列）
    - output_file: 输出文件名（可选，默认validation_result.xlsx）
+   - string_columns: 需要保持为字符串格式的列名列表（避免"001"变成1）
 
 3. 输出文件包含3个sheet：
-   - 验证结果：带验证状态的完整数据
+   - 验证结果：组级别的汇总数据，行数等于组数量
    - 分组统计：各组的汇总统计
    - 异常详情：所有异常行的详细信息
 
-4. 注意事项：
+4. 数据格式保持：
+   - 使用string_columns参数指定需要保持字符串格式的列
+   - 例如：订单号"001"会保持为"001"而不是变成1
+   - 适用于编号、代码、ID等需要保持前导零的数据
+
+5. 注意事项：
    - 确保输入文件存在
    - 确保比较的列名在文件中存在
    - 输出文件会自动保存在当前文件夹
    - 需要安装pandas和openpyxl库
+   - 对于重要的格式保持，建议使用string_columns参数
 """
