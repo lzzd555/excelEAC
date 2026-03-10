@@ -41,20 +41,6 @@ def process_excel_with_validation(
             if col in df.columns:
                 df[col] = df[col].astype(str)
 
-    # 如果没有指定输出列，默认使用所有列
-    if output_columns is None:
-        output_columns = df.columns.tolist()
-    else:
-        # 确保分组列在输出列中
-        for col in group_columns:
-            if col not in output_columns:
-                output_columns.append(col)
-
-        # 添加状态列
-        status_col = '验证状态'
-        if status_col not in output_columns:
-            output_columns.append(status_col)
-
     # 2. 数据验证检查
     print("正在验证数据...")
     # 获取比较列名
@@ -73,29 +59,45 @@ def process_excel_with_validation(
 
     # 3. 分组检查
     print("正在进行分组验证...")
-    # 分组检查每组是否全正常
-    def check_group(group):
-        is_all_normal = group['行是否正常'].all()
-        return pd.Series({
-            '组状态': '正常' if is_all_normal else '异常',
-            '正常行数': group['行是否正常'].sum(),
-            '异常行数': (~group['行是否正常']).sum(),
-            '总行数': len(group),
-            '异常率': f"{(~group['行是否正常']).mean()*100:.1f}%"
-        })
 
-    # 分组计算
-    group_stats = df.groupby(group_columns).apply(check_group).reset_index()
+    # 使用更直接的方法计算统计信息
+    # 获取所有唯一的分组
+    unique_groups = df.groupby(group_columns).size().reset_index()
+
+    # 计算每个组的状态
+    group_results = []
+    for _, group_row in unique_groups.iterrows():
+        group_key = tuple(group_row[group_columns])
+
+        # 筛选出属于当前组的数据
+        group_data = df.copy()
+        for i, col in enumerate(group_columns):
+            group_data = group_data[group_data[col] == group_key[i]]
+
+        # 检查是否全正常
+        is_all_normal = group_data['行是否正常'].all()
+        normal_count = group_data['行是否正常'].sum()
+        total_count = len(group_data)
+        abnormal_count = total_count - normal_count
+
+        # 创建结果行
+        result_row = group_row.to_dict()
+        result_row['验证状态'] = '正常' if is_all_normal else '异常'
+        result_row['正常行数'] = normal_count
+        result_row['异常行数'] = abnormal_count
+        result_row['总行数'] = total_count
+        result_row['异常率'] = f"{abnormal_count/total_count*100:.1f}%"
+
+        group_results.append(result_row)
+
+    # 创建结果DataFrame
+    group_stats = pd.DataFrame(group_results)
 
     # 4. 处理输出列选择
     # 确保验证状态在输出列中
     if output_columns is not None:
-        # 确保分组列在输出列中
+        # 只保留分组列（因为分组后的结果不包含原始数据列）
         final_output_columns = group_columns.copy()
-        # 添加其他指定的输出列
-        for col in output_columns:
-            if col not in final_output_columns and col != '验证状态':
-                final_output_columns.append(col)
         # 添加验证状态列
         if '验证状态' not in final_output_columns:
             final_output_columns.append('验证状态')
@@ -103,12 +105,15 @@ def process_excel_with_validation(
         # 如果没有指定输出列，使用所有列
         final_output_columns = group_stats.columns.tolist()
 
-    # 5. 重命名列名以匹配输出需求
-    # 将'组状态'重命名为'验证状态'
-    group_stats = group_stats.rename(columns={'组状态': '验证状态'})
-
-    # 6. 选择最终的组级别数据（只保留汇总数据）
+    # 5. 选择最终的组级别数据（只保留汇总数据）
     final_result = group_stats[final_output_columns].copy()
+
+    # 6. 处理字符串格式列
+    if string_columns:
+        # 确保分组列中的字符串列保持格式
+        for col in group_columns:
+            if col in string_columns and col in final_result.columns:
+                final_result[col] = final_result[col].astype(str)
 
     # 7. 输出到Excel，保持原始格式
     print(f"正在输出结果到 {output_file}...")
@@ -116,19 +121,27 @@ def process_excel_with_validation(
     # 创建Excel writer，使用openpyxl保持格式
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         # 验证结果 - 组级别的汇总数据
+        # 创建副本并强制转换为字符串格式
+        final_result_copy = final_result.copy()
+
         if string_columns:
-            # 对于字符串列，先转换为字符串再写入
-            final_result_copy = final_result.copy()
             for col in string_columns:
                 if col in final_result_copy.columns:
                     final_result_copy[col] = final_result_copy[col].astype(str)
-            final_result_copy.to_excel(writer, sheet_name='验证结果', index=False)
-        else:
-            final_result.to_excel(writer, sheet_name='验证结果', index=False)
+
+        final_result_copy.to_excel(writer, sheet_name='验证结果', index=False)
 
         # 分组统计摘要 - 更详细的统计信息
         group_summary = group_stats[group_columns + ['验证状态', '正常行数', '异常行数', '总行数', '异常率']]
-        group_summary.to_excel(writer, sheet_name='分组统计', index=False)
+        group_summary_copy = group_summary.copy()
+
+        # 同样处理分组统计中的字符串列
+        if string_columns:
+            for col in string_columns:
+                if col in group_summary_copy.columns:
+                    group_summary_copy[col] = group_summary_copy[col].astype(str)
+
+        group_summary_copy.to_excel(writer, sheet_name='分组统计', index=False)
 
         # 异常详情（如果原始数据可用）
         if '行是否正常' in df.columns:
@@ -148,7 +161,14 @@ def process_excel_with_validation(
                 if '行是否正常' not in abnormal_cols:
                     abnormal_cols.append('行是否正常')
 
-                abnormal_data[abnormal_cols].to_excel(writer, sheet_name='异常详情', index=False)
+                # 确保异常详情中的字符串列格式正确
+                abnormal_data_copy = abnormal_data[abnormal_cols].copy()
+                if string_columns:
+                    for col in string_columns:
+                        if col in abnormal_data_copy.columns:
+                            abnormal_data_copy[col] = abnormal_data_copy[col].astype(str)
+
+                abnormal_data_copy.to_excel(writer, sheet_name='异常详情', index=False)
 
     print(f"文件已保存到: {output_file}")
     return final_result
@@ -156,86 +176,50 @@ def process_excel_with_validation(
 
 # 使用示例
 if __name__ == "__main__":
-    # 示例1：基本用法
-    result = process_excel_with_validation(
-        input_file='your_data.xlsx',
+    # 创建测试数据
+    test_data = {
+        '订单号': ['001', '002', '003', '001', '002', '003'],
+        '产品代码': ['P01', 'P02', 'P03', 'P01', 'P02', 'P03'],
+        '部门': ['A', 'A', 'B', 'B', 'A', 'B'],
+        '月份': ['2024-01', '2024-01', '2024-01', '2024-02', '2024-02', '2024-02'],
+        '计划数量': [100, 200, 150, 120, 180, 160],
+        '实际数量': [100, 200, 150, 120, 180, 160]
+    }
+    test_df = pd.DataFrame(test_data)
+    test_df.to_excel('test_data.xlsx', index=False)
+
+    print("测试数据创建完成")
+    print(test_df)
+
+    # 测试：不使用string_columns参数
+    print("\n=== 测试1：不使用string_columns参数 ===")
+    result1 = process_excel_with_validation(
+        input_file='test_data.xlsx',
         sheet_name='Sheet1',
         group_columns=['部门', '月份'],
         compare_columns=['计划数量', '实际数量'],
-        output_columns=['部门', '月份', '产品名称'],  # 注意：输出列数会等于组数量，不是原始行数
-        output_file='validation_result.xlsx'
+        output_columns=['部门', '月份', '订单号', '产品代码'],
+        output_file='test_result_without_string.xlsx'
     )
 
-    # 示例2：自动在当前文件夹创建文件
+    print("结果1:")
+    print(result1)
+    if '订单号' in result1.columns:
+        print("订单号的数据类型:", result1['订单号'].dtype)
+
+    # 测试：使用string_columns参数
+    print("\n=== 测试2：使用string_columns参数 ===")
     result2 = process_excel_with_validation(
-        input_file='sales_data.xlsx',
-        sheet_name='订单数据',
-        group_columns=['客户ID'],
-        compare_columns=['订单金额', '实付金额'],
-        output_file='department_validation.xlsx'  # 会自动保存到当前文件夹
-    )
-
-    # 示例3：保持数据格式（避免"001"变成1）
-    result3 = process_excel_with_validation(
-        input_file='data.xlsx',
+        input_file='test_data.xlsx',
         sheet_name='Sheet1',
-        group_columns=['部门'],
-        compare_columns=['计划值', '实际值'],
-        output_columns=['部门', '订单号', '产品代码'],
-        output_file='formatted_result.xlsx',
-        string_columns=['订单号', '产品代码']  # 这些列将保持字符串格式
+        group_columns=['部门', '月份'],
+        compare_columns=['计划数量', '实际数量'],
+        output_columns=['部门', '月份', '订单号', '产品代码'],
+        output_file='test_result_with_string.xlsx',
+        string_columns=['订单号', '产品代码']
     )
 
-    # 示例4：查看当前文件夹的输出文件
-    print("\n当前文件夹中的输出文件:")
-    for file in os.listdir('.'):
-        if file.endswith('.xlsx'):
-            print(f"- {file}")
-
-    # 查看输出结果（验证结果sheet只有组数量行）
-    print(f"\n验证结果包含 {len(result)} 行数据（等于组数量）")
-
-
-# 使用说明
-"""
-使用说明：
-
-1. 基本使用方法：
-   from excel_validator import process_excel_with_validation
-
-   result = process_excel_with_validation(
-       input_file='your_data.xlsx',        # 你的Excel文件
-       sheet_name='Sheet1',                # 工作表名称
-       group_columns=['部门'],             # 分组列（可以多列）
-       compare_columns=['计划值', '实际值'], # 需要比较的两列
-       output_columns=['部门', '产品', '计划值', '实际值'], # 输出列（可选）
-       output_file='result.xlsx',          # 输出文件名（可选）
-       string_columns=['订单号']           # 保持为字符串格式的列（可选）
-   )
-
-2. 参数说明：
-   - input_file: 输入Excel文件路径
-   - sheet_name: 工作表名称
-   - group_columns: 分组列名列表（可以是一列或多列）
-   - compare_columns: 需要比较是否相等的列名列表（必须是2列）
-   - output_columns: 输出到新Excel的列名列表（可选，默认所有列）
-   - output_file: 输出文件名（可选，默认validation_result.xlsx）
-   - string_columns: 需要保持为字符串格式的列名列表（避免"001"变成1）
-
-3. 输出文件包含3个sheet：
-   - 验证结果：组级别的汇总数据，行数等于组数量
-   - 分组统计：各组的汇总统计
-   - 异常详情：所有异常行的详细信息
-
-4. 数据格式保持：
-   - 使用string_columns参数指定需要保持字符串格式的列
-   - 例如：订单号"001"会保持为"001"而不是变成1
-   - 适用于编号、代码、ID等需要保持前导零的数据
-
-5. 注意事项：
-   - 确保输入文件存在
-   - 确保比较的列名在文件中存在
-   - 输出文件会自动保存在当前文件夹
-   - 需要安装pandas和openpyxl库
-   - 对于重要的格式保持，建议使用string_columns参数
-"""
+    print("结果2:")
+    print(result2)
+    if '订单号' in result2.columns:
+        print("订单号的数据类型:", result2['订单号'].dtype)
