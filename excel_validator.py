@@ -95,10 +95,14 @@ def process_excel_with_validation(
         # 如果没有指定输出列，使用所有列
         final_output_columns = group_stats.columns.tolist()
 
-    # 5. 选择最终的组级别数据（只保留汇总数据）
+    # 5. 重命名列名以匹配输出需求
+    # 将'组状态'重命名为'验证状态'
+    group_stats = group_stats.rename(columns={'组状态': '验证状态'})
+
+    # 6. 选择最终的组级别数据（只保留汇总数据）
     final_result = group_stats[final_output_columns].copy()
 
-    # 6. 输出到Excel
+    # 7. 输出到Excel
     print(f"正在输出结果到 {output_file}...")
 
     # 创建Excel writer，支持多个sheet
