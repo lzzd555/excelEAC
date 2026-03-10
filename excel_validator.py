@@ -115,13 +115,15 @@ def process_excel_with_validation(
         additional_cols = [col for col in output_columns
                           if col in group_stats.columns and col not in final_output_columns]
         if additional_cols:
-            print(f"可用汇总列: {list(group_stats.columns)}")
-            print(f"请求的额外列: {additional_cols}")
             # 添加这些汇总列
             for col in additional_cols:
                 if col in group_stats.columns:
                     final_result[col] = group_stats[col]
-            print(f"已添加的列: {additional_cols}")
+        else:
+            # 如果没有额外的列可用，显示可用的列
+            print(f"\n可用的汇总列: {list(group_stats.columns)}")
+            print(f"注意: 不能在汇总数据中包含原始数据列（如订单号、产品代码）")
+            print(f"因为这些列在分组后不存在于汇总结果中\n")
 
     # 6. 处理字符串格式列
     if string_columns:
