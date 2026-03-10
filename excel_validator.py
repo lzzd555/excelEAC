@@ -108,6 +108,21 @@ def process_excel_with_validation(
     # 5. 选择最终的组级别数据（只保留汇总数据）
     final_result = group_stats[final_output_columns].copy()
 
+    # 6. 如果用户指定了额外的输出列，尝试添加汇总信息
+    # 注意：只有已经在 group_stats 中的列才能被添加
+    if output_columns is not None:
+        # 检查是否有在output_columns中但不在final_output_columns中的列
+        additional_cols = [col for col in output_columns
+                          if col in group_stats.columns and col not in final_output_columns]
+        if additional_cols:
+            print(f"可用汇总列: {list(group_stats.columns)}")
+            print(f"请求的额外列: {additional_cols}")
+            # 添加这些汇总列
+            for col in additional_cols:
+                if col in group_stats.columns:
+                    final_result[col] = group_stats[col]
+            print(f"已添加的列: {additional_cols}")
+
     # 6. 处理字符串格式列
     if string_columns:
         # 确保分组列中的字符串列保持格式

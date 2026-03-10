@@ -45,9 +45,34 @@ result = process_excel_with_validation(
 | sheet_name | str | 是 | 工作表名称 |
 | group_columns | List[str] | 是 | 分组列名列表（可以是一列或多列） |
 | compare_columns | List[str] | 是 | 需要比较是否相等的列名列表（必须是2列） |
-| output_columns | List[str] | 否 | 输出到新Excel的列名列表（默认所有列） |
+| output_columns | List[str] | 否 | 输出到新Excel的列名列表 |
 | output_file | str | 否 | 输出文件名（默认validation_result.xlsx） |
 | string_columns | List[str] | 否 | 需要保持为字符串格式的列名列表（避免"001"变成1） |
+
+### output_columns 参数详解
+
+`output_columns` 参数控制最终输出中显示哪些列：
+
+#### 可用的列：
+1. **分组列**（必须）：如 `['部门', '月份']`
+2. **汇总列**（可选）：
+   - `验证状态`：'正常' 或 '异常'
+   - `正常行数`：该组中正常数据的行数
+   - `异常行数`：该组中异常数据的行数
+   - `总行数`：该组的总行数
+   - `异常率`：异常行数的百分比
+
+#### 使用示例：
+```python
+# 只显示分组列和状态
+output_columns=['部门', '月份']
+
+# 显示分组列和详细统计
+output_columns=['部门', '月份', '验证状态', '总行数', '正常行数']
+
+# 显示所有可用的汇总信息
+output_columns=['部门', '月份', '验证状态', '总行数', '正常行数', '异常行数', '异常率']
+```
 
 ### 输出文件结构
 
@@ -144,19 +169,37 @@ result = process_excel_with_validation(
 )
 ```
 
-### 示例4：保持数据格式（解决"001"变成1的问题）
+### 示例4：自定义输出列（控制显示哪些汇总信息）
 
 ```python
-# 处理订单数据，保持订单号和产品代码的原始格式
+# 只显示分组列和验证状态
 result = process_excel_with_validation(
     input_file='orders.xlsx',
     sheet_name='订单数据',
     group_columns=['客户ID'],
     compare_columns=['计划金额', '实际金额'],
-    output_columns=['客户ID', '订单号', '产品代码', '计划金额', '实际金额'],
-    string_columns=['订单号', '产品代码']  # 重要：保持原始格式
+    output_columns=['客户ID', '验证状态']
 )
-# 结果：订单号"00123"会保持为"00123"而不是变成123
+
+# 显示分组列和详细统计
+result = process_excel_with_validation(
+    input_file='orders.xlsx',
+    sheet_name='订单数据',
+    group_columns=['客户ID'],
+    compare_columns=['计划金额', '实际金额'],
+    output_columns=['客户ID', '验证状态', '总行数', '正常行数', '异常率']
+)
+
+# 同时保持数据格式
+result = process_excel_with_validation(
+    input_file='orders.xlsx',
+    sheet_name='订单数据',
+    group_columns=['客户ID'],
+    compare_columns=['计划金额', '实际金额'],
+    output_columns=['客户ID', '验证状态', '总行数'],
+    string_columns=['客户ID']  # 保持客户ID的原始格式
+)
+# 结果：客户ID"001"会保持为"001"而不是变成1
 ```
 
 ## 注意事项
