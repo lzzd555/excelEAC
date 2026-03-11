@@ -4,7 +4,13 @@
       "Bash(git push)",
       "Bash(python test_standard.py)",
       "Bash(git add excel_validator.py test_standard.py test_abnormal_detail.py)",
-      "Bash(git add .)"
+      "Bash(git add .)",
+      "Bash(python run_tests.py 2>&1 | head -150)",
+      "Bash(python run_tests.py 2>&1 | head -100)",
+      "Bash(cd /Users/lzzd/project/excelEAC && python run_tests.py 2>&1 | head -100)",
+      "Bash(python run_tests.py 2>&1 | grep -A 5 \"测试结果汇总\")",
+      "Bash(git add run_tests.py)",
+      "Bash(git push origin main)"
     ]
   }
 }

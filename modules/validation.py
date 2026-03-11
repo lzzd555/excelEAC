@@ -1,6 +1,15 @@
+"""
+Excel数据验证模块
+提供数据验证、分组和异常检测功能
+"""
+
 import pandas as pd
 from typing import List, Dict, Any, Optional
 import os
+import openpyxl
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import PatternFill
+
 
 def process_excel_with_validation(
     input_file: str,
@@ -20,7 +29,7 @@ def process_excel_with_validation(
         sheet_name: 工作表名称
         group_columns: 分组列名列表
         compare_columns: 需要比较是否相等的列名列表（必须是2列）
-        output_columns: 输出到新Excel的列名列表（包含分组状态列）
+        output_columns: 输出到新Excel的列名列表
         output_file: 输出文件名
         string_columns: 需要保持为字符串格式的列名列表（避免"001"变成1）
         abnormal_detail_columns: 异常详情中需要显示的原表列名列表。如果为None，则自动包含分组列、比较列和字符串列。
@@ -64,7 +73,6 @@ def process_excel_with_validation(
                 # 使用pandas的string类型来保持前导零
                 df[col] = df[col].astype('string')
 
-    # 逐行比较两列数据
     # 逐行比较两列数据
     df['行是否正常'] = (df[col1] == df[col2])
 
@@ -238,7 +246,6 @@ def process_excel_with_validation(
                 for col_idx, col_name in enumerate(temp_abnormal_data.columns):
                     if col_name in string_columns:
                         # 设置列宽，确保内容显示完整
-                        from openpyxl.utils import get_column_letter
                         ws.column_dimensions[get_column_letter(col_idx + 1)].width = 15
 
                         # 设置整个列的格式为文本
@@ -247,7 +254,7 @@ def process_excel_with_validation(
                             # 设置单元格格式为文本，保持前导零
                             cell.number_format = '@'
 
-                            # 确保数据是字符串格式
+                        # 确保数据是字符串格式
                         for row_idx in range(len(temp_abnormal_data)):
                             row_idx_excel = row_idx + 2  # Excel行号（从2开始）
                             cell_value = temp_abnormal_data.iloc[row_idx, col_idx]
@@ -256,7 +263,6 @@ def process_excel_with_validation(
                                 ws.cell(row=row_idx_excel, column=col_idx + 1).value = str(cell_value)
 
             # 添加颜色标记：异常行标红
-            from openpyxl.styles import PatternFill
             red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
             # 为异常行添加背景色
@@ -271,54 +277,3 @@ def process_excel_with_validation(
 
     print(f"文件已保存到: {output_file}")
     return final_result
-
-
-# 使用示例
-if __name__ == "__main__":
-    # 创建测试数据
-    test_data = {
-        '订单号': ['001', '002', '003', '001', '002', '003'],
-        '产品代码': ['P01', 'P02', 'P03', 'P01', 'P02', 'P03'],
-        '部门': ['A', 'A', 'B', 'B', 'A', 'B'],
-        '月份': ['2024-01', '2024-01', '2024-01', '2024-02', '2024-02', '2024-02'],
-        '计划数量': [100, 200, 150, 120, 180, 160],
-        '实际数量': [100, 200, 150, 120, 180, 160]
-    }
-    test_df = pd.DataFrame(test_data)
-    test_df.to_excel('test_data.xlsx', index=False)
-
-    print("测试数据创建完成")
-    print(test_df)
-
-    # 测试：不使用string_columns参数
-    print("\n=== 测试1：不使用string_columns参数 ===")
-    result1 = process_excel_with_validation(
-        input_file='test_data.xlsx',
-        sheet_name='Sheet1',
-        group_columns=['部门', '月份'],
-        compare_columns=['计划数量', '实际数量'],
-        output_columns=['部门', '月份', '订单号', '产品代码'],
-        output_file='test_result_without_string.xlsx'
-    )
-
-    print("结果1:")
-    print(result1)
-    if '订单号' in result1.columns:
-        print("订单号的数据类型:", result1['订单号'].dtype)
-
-    # 测试：使用string_columns参数
-    print("\n=== 测试2：使用string_columns参数 ===")
-    result2 = process_excel_with_validation(
-        input_file='test_data.xlsx',
-        sheet_name='Sheet1',
-        group_columns=['部门', '月份'],
-        compare_columns=['计划数量', '实际数量'],
-        output_columns=['部门', '月份', '订单号', '产品代码'],
-        output_file='test_result_with_string.xlsx',
-        string_columns=['订单号', '产品代码']
-    )
-
-    print("结果2:")
-    print(result2)
-    if '订单号' in result2.columns:
-        print("订单号的数据类型:", result2['订单号'].dtype)
