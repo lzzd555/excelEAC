@@ -299,8 +299,19 @@ excelEAC/
 │   └── merge.py            # 表合并模块
 ├── tests/                   # 测试代码
 │   ├── README.md            # 测试说明
-│   ├── test_*.py           # 验证模块测试
-│   └── test_merge.py        # 合并模块测试
+│   ├── validation/          # 验证模块测试
+│   │   ├── README.md        # 验证测试说明
+│   │   └── test_*.py      # 验证测试文件
+│   └── merge/              # 合并模块测试
+│       ├── README.md        # 合并测试说明
+│       ├── sample_data/     # 测试样例数据
+│       │   ├── table_a_basic.xlsx
+│       │   ├── table_b_basic.xlsx
+│       │   ├── table_a_extra.xlsx
+│       │   ├── table_b_extra.xlsx
+│       │   ├── table_a_multi.xlsx
+│       │   └── table_b_multi.xlsx
+│       └── test_*.py      # 合并测试文件
 ├── run_tests.py             # 测试运行脚本
 ├── README.md               # 项目说明文档
 └── .gitignore             # Git忽略配置

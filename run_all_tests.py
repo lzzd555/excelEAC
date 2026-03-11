@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""运行所有测试的脚本"""
+"""
+运行所有测试的脚本
+"""
 
 import subprocess
 import sys
 import os
 
+
 def run_test(test_file, description):
+    """运行单个测试"""
     print(f"\n{'='*60}")
     print(f"运行测试: {description}")
     print(f"{'='*60}")
     try:
+        # 从项目根目录运行
         result = subprocess.run(
             [sys.executable, test_file],
             capture_output=True,
@@ -29,16 +34,20 @@ def run_test(test_file, description):
         print(f"❌ 测试执行失败: {e}")
         return False
 
+
 def main():
+    """主函数"""
     tests_dir = 'tests'
     project_root = os.path.dirname(os.path.abspath(__file__))
 
+    # 验证模块测试
     validation_tests = [
         (f'{tests_dir}/validation/test_standard.py', '标准验证测试'),
         (f'{tests_dir}/validation/test_abnormal_detail.py', '异常详情测试'),
         (f'{tests_dir}/validation/test_string_columns.py', '字符串列测试'),
     ]
 
+    # 合并模块测试
     merge_tests = [
         (f'{tests_dir}/merge/test_basic_merge.py', '基本合并测试'),
         (f'{tests_dir}/merge/test_extra_columns.py', '带额外列的合并测试'),
@@ -55,6 +64,7 @@ def main():
         success = run_test(test_file, description)
         results.append((test_file, description, success))
 
+    # 汇总结果
     print(f"\n{'='*60}")
     print("测试结果汇总")
     print(f"{'='*60}")
@@ -85,6 +95,7 @@ def main():
     else:
         print(f"\n⚠️  {failed} 个测试失败，请检查输出")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
