@@ -58,6 +58,10 @@ def parse_match_columns(columns_input: str) -> Dict[str, str]:
     """
     mapping = {}
 
+    # 处理空输入
+    if not columns_input.strip():
+        return mapping
+
     if ':' in columns_input:
         # 新格式：A:B,C:D
         pairs = columns_input.split(',')
@@ -72,7 +76,8 @@ def parse_match_columns(columns_input: str) -> Dict[str, str]:
         # 旧格式：单个列或多列逗号分隔
         columns = [col.strip() for col in columns_input.split(',')]
         for col in columns:
-            mapping[col] = col
+            if col:  # 跳过空字符串
+                mapping[col] = col
 
     return mapping
 

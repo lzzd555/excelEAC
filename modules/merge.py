@@ -80,16 +80,18 @@ def merge_excel_tables(
     print(f"正在读取表B: {table_b_file} 的 {table_b_sheet} 工作表...")
     dtype_dict_b = {}
     if string_columns:
-        for col in string_columns:
-            dtype_dict_b[col] = 'string'
+        # 注意：表B的列名可能与表A不同，需要根据match_columns映射
+        for a_col, b_col in match_columns.items():
+            if a_col in string_columns and b_col not in dtype_dict_b:
+                dtype_dict_b[b_col] = 'string'
 
     df_b = pd.read_excel(table_b_file, sheet_name=table_b_sheet, dtype=dtype_dict_b)
 
     # 确保字符串列保持字符串格式
     if string_columns:
-        for col in string_columns:
-            if col in df_b.columns:
-                df_b[col] = df_b[col].astype('string')
+        for a_col, b_col in match_columns.items():
+            if a_col in string_columns and b_col in df_b.columns:
+                df_b[b_col] = df_b[b_col].astype('string')
 
     print(f"表B数据: {len(df_b)} 行, {len(df_b.columns)} 列")
     print(f"表B列名: {list(df_b.columns)}\n")
@@ -144,6 +146,20 @@ def merge_excel_tables(
     # 6. 执行表合并
     print("正在执行表合并...")
 
+    # 如果没有匹配列，返回空DataFrame
+    if not match_columns:
+        print("没有匹配列，返回空DataFrame\n")
+        merged_df = pd.DataFrame(columns=final_columns)
+        print(f"合并结果: {len(merged_df)} 行, {len(merged_df.columns)} 列")
+
+        # 输出到Excel
+        print(f"正在输出结果到 {output_file}...")
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            merged_df.to_excel(writer, sheet_name='合并结果', index=False)
+
+        print(f"文件已保存到: {output_file}")
+        return merged_df
+
     merged_rows = []
     merged_count = 0
 
@@ -186,12 +202,16 @@ def merge_excel_tables(
 
     # 7. 创建合并后的DataFrame
     # 确保列顺序正确
-    merged_df = pd.DataFrame(merged_rows)
+    if merged_rows:
+        merged_df = pd.DataFrame(merged_rows)
 
-    # 按最终列顺序重新排序列
-    # 只保留最终列中存在的列
-    available_columns = [col for col in final_columns if col in merged_df.columns]
-    merged_df = merged_df[available_columns]
+        # 按最终列顺序重新排序列
+        # 只保留最终列中存在的列
+        available_columns = [col for col in final_columns if col in merged_df.columns]
+        merged_df = merged_df[available_columns]
+    else:
+        # 如果没有匹配的行，仍然创建具有正确列结构的空DataFrame
+        merged_df = pd.DataFrame(columns=final_columns)
 
     print(f"合并结果: {len(merged_df)} 行, {len(merged_df.columns)} 列")
 
