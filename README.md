@@ -27,6 +27,7 @@
   - 自动去重和列排序
 - **数据类型保持**：支持字符串格式保持，避免"001"变成"1"
 - **多列匹配**：支持按多个列同时匹配数据
+- **列名映射**：支持表A和表B使用不同列名进行匹配（新功能）
 
 ## 安装要求
 
@@ -52,6 +53,7 @@ result = process_excel_with_validation(
 )
 
 # 使用表合并功能
+# 方式1：使用相同的列名（旧格式，仍然支持）
 merged = merge_excel_tables(
     table_a_file='table_a.xlsx',
     table_a_sheet='Sheet1',
@@ -61,6 +63,19 @@ merged = merge_excel_tables(
     table_a_extra_columns=['姓名', '部门'],
     table_b_extra_columns=['职位', '薪资'],
     output_file='merge_result.xlsx'
+)
+
+# 方式2：使用不同的列名映射（新功能）
+merged = merge_excel_tables(
+    table_a_file='table_a.xlsx',
+    table_a_sheet='Sheet1',
+    table_b_file='table_b.xlsx',
+    table_b_sheet='Sheet1',
+    match_columns={'ID': '员工编号', '部门': '部门编码'},  # 表A列名映射到表B列名
+    table_a_extra_columns=['姓名', '职位'],
+    table_b_extra_columns=['薪资', '入职日期'],
+    output_file='merge_result.xlsx',
+    string_columns=['ID', '员工编号']
 )
 ```
 
@@ -84,8 +99,14 @@ python main.py validate -i data.xlsx -s Sheet1 -g 部门 -c 计划值,实际值 
 
 #### 表合并命令
 
+##### 使用相同的列名（旧格式）
 ```bash
 python main.py merge -a table_a.xlsx -A Sheet1 -b table_b.xlsx -B Sheet1 -m ID -a_extra 姓名,部门 -b_extra 职位,薪资 -o merged.xlsx
+```
+
+##### 使用不同的列名映射（新格式）
+```bash
+python main.py merge -a table_a.xlsx -A Sheet1 -b table_b.xlsx -B Sheet1 -m "ID:员工编号,部门:部门编码" -a_extra 姓名,职位 -b_extra 薪资,入职日期 -o merged.xlsx --string-columns "ID,员工编号"
 ```
 
 参数说明：
@@ -93,7 +114,9 @@ python main.py merge -a table_a.xlsx -A Sheet1 -b table_b.xlsx -B Sheet1 -m ID -
 - `-A, --table-a-sheet`: 表A的工作表名称（必需）
 - `-b, --table-b`: 表B的Excel文件路径（必需）
 - `-B, --table-b-sheet`: 表B的工作表名称（必需）
-- `-m, --match-columns`: 匹配列名，逗号分隔（必需）
+- `-m, --match-columns`: 匹配列名（必需）
+  - 旧格式：`ID` 或 `ID,部门`（表A和表B使用相同列名）
+  - 新格式：`"ID:员工编号,部门:部门编码"`（表A列名:表B列名）
 - `--table-a-extra-columns`: 表A额外列名，逗号分隔（可选）
 - `--table-b-extra-columns`: 表B额外列名，逗号分隔（可选）
 - `-o, --output`: 输出文件名（默认：merge_result.xlsx）

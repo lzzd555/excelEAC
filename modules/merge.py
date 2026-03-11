@@ -4,7 +4,7 @@ Excel表合并模块
 """
 
 import pandas as pd
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import os
 
 
@@ -13,7 +13,7 @@ def merge_excel_tables(
     table_a_sheet: str,
     table_b_file: str,
     table_b_sheet: str,
-    match_columns: List[str],
+    match_columns: Union[List[str], Dict[str, str]],
     table_a_extra_columns: Optional[List[str]] = None,
     table_b_extra_columns: Optional[List[str]] = None,
     output_file: str = 'merge_result.xlsx',
@@ -27,7 +27,9 @@ def merge_excel_tables(
         table_a_sheet: 表A的工作表名称
         table_b_file: 表B的Excel文件路径
         table_b_sheet: 表B的工作表名称
-        match_columns: 需要匹配的列名列表
+        match_columns: 需要匹配的列名。支持两种格式：
+            - List[str]: ['ID', '部门'] - 表A和表B使用相同列名
+            - Dict[str, str]: {'ID': '员工编号', '部门': '部门编码'} - 表A列名映射到表B列名
         table_a_extra_columns: 从表A中额外添加的列名列表（除匹配列外）
         table_b_extra_columns: 从表B中额外添加的列名列表（除匹配列外）
         output_file: 输出文件名
@@ -37,10 +39,13 @@ def merge_excel_tables(
         合并后的DataFrame
 
     示例:
-        选取相同列为a,b
+        旧格式（相同列名）:
+            match_columns=['ID', '部门']
+        新格式（不同列名映射）:
+            match_columns={'ID': '员工编号', '部门': '部门编码'}
         从表A中额外加入c,d
         从表B中额外加入e,f,g
-        最后新表中的列为a,b,c,d,e,f,g
+        最后新表中的列为匹配列+c+d+e+f+g
     """
     # 确保输出文件在当前文件夹
     if not os.path.isabs(output_file):
@@ -48,6 +53,10 @@ def merge_excel_tables(
         output_file = os.path.join(os.getcwd(), output_file)
 
     print("=== Excel表合并工具 ===\n")
+
+    # 向后兼容处理：将 List[str] 转换为 Dict[str, str]
+    if isinstance(match_columns, list):
+        match_columns = {col: col for col in match_columns}
 
     # 1. 读取表A数据
     print(f"正在读取表A: {table_a_file} 的 {table_a_sheet} 工作表...")
@@ -87,15 +96,18 @@ def merge_excel_tables(
 
     # 3. 验证匹配列是否存在
     print("正在验证匹配列...")
-    missing_in_a = [col for col in match_columns if col not in df_a.columns]
-    missing_in_b = [col for col in match_columns if col not in df_b.columns]
 
+    # 检查表A是否有所有key
+    missing_in_a = [col for col in match_columns.keys() if col not in df_a.columns]
     if missing_in_a:
-        raise ValueError(f"匹配列在表A中不存在: {missing_in_a}")
-    if missing_in_b:
-        raise ValueError(f"匹配列在表B中不存在: {missing_in_b}")
+        raise ValueError(f"表A中不存在匹配列: {missing_in_a}")
 
-    print(f"匹配列: {match_columns}")
+    # 检查表B是否有所有对应的value
+    missing_in_b = [b_col for a_col, b_col in match_columns.items() if b_col not in df_b.columns]
+    if missing_in_b:
+        raise ValueError(f"表B中不存在匹配列: {missing_in_b}")
+
+    print(f"列映射关系: {match_columns}")
     print(f"表A额外列: {table_a_extra_columns if table_a_extra_columns else '无'}")
     print(f"表B额外列: {table_b_extra_columns if table_b_extra_columns else '无'}\n")
 
@@ -111,19 +123,19 @@ def merge_excel_tables(
             raise ValueError(f"表B额外列不存在: {missing_extra_b}")
 
     # 5. 确定最终列顺序
-    # 匹配列 + 表A额外列 + 表B额外列
-    final_columns = match_columns.copy()
+    # 匹配列（使用表A的列名）+ 表A额外列 + 表B额外列
+    final_columns = list(match_columns.keys())
 
     # 添加表A的额外列（去除重复）
     if table_a_extra_columns:
         for col in table_a_extra_columns:
-            if col not in final_columns and col != match_columns:
+            if col not in final_columns:
                 final_columns.append(col)
 
     # 添加表B的额外列（去除重复）
     if table_b_extra_columns:
         for col in table_b_extra_columns:
-            if col not in final_columns and col != match_columns:
+            if col not in final_columns:
                 final_columns.append(col)
 
     print(f"最终输出列: {final_columns}")
@@ -137,13 +149,10 @@ def merge_excel_tables(
 
     # 遍历表A的每一行
     for _, row_a in df_a.iterrows():
-        # 提取匹配列的值
-        match_values = tuple(row_a[col] for col in match_columns)
-
         # 在表B中查找匹配的行
         match_condition = True
-        for col in match_columns:
-            match_condition = match_condition & (df_b[col] == row_a[col])
+        for a_col, b_col in match_columns.items():
+            match_condition = match_condition & (df_b[b_col] == row_a[a_col])
 
         # 找到所有匹配的行
         matched_rows_b = df_b[match_condition]
@@ -154,10 +163,9 @@ def merge_excel_tables(
                 # 创建新行字典
                 new_row = {}
 
-                # 添加匹配列的值
-                for col in match_columns:
-                    # 如果两列值相同，使用表A的值（避免重复）
-                    new_row[col] = row_a[col]
+                # 添加匹配列的值（使用表A的列名）
+                for a_col in match_columns.keys():
+                    new_row[a_col] = row_a[a_col]
 
                 # 添加表A的额外列
                 if table_a_extra_columns:
@@ -247,18 +255,45 @@ if __name__ == "__main__":
 
     print("示例数据已创建: example_table_a.xlsx, example_table_b.xlsx\n")
 
-    # 执行合并
-    result = merge_excel_tables(
+    # 执行合并（使用相同的列名）
+    result1 = merge_excel_tables(
         table_a_file='example_table_a.xlsx',
         table_a_sheet='Sheet1',
         table_b_file='example_table_b.xlsx',
         table_b_sheet='Sheet1',
-        match_columns=['ID'],  # 按ID列匹配
+        match_columns=['ID'],  # 按ID列匹配（旧格式，仍然支持）
         table_a_extra_columns=['姓名', '部门', '年龄', '入职日期'],  # 表A额外列
         table_b_extra_columns=['职位', '薪资', '绩效等级'],  # 表B额外列
-        output_file='example_merge_result.xlsx',
+        output_file='example_merge_result1.xlsx',
         string_columns=['ID']  # ID列保持字符串格式
     )
+
+    print("\n=== 使用不同列名映射的示例 ===\n")
+
+    # 创建不同列名的示例数据
+    table_b_data_diff = {
+        '员工编号': ['A001', 'A002', 'A003', 'B001'],
+        '岗位': ['经理', '专员', '主管', '经理'],
+        '薪酬': [10000, 8000, 12000, 15000],
+        '评级': ['A', 'B', 'A', 'A']
+    }
+    df_b_diff = pd.DataFrame(table_b_data_diff)
+    df_b_diff.to_excel('example_table_b_diff.xlsx', index=False)
+
+    # 执行合并（使用不同的列名映射）
+    result2 = merge_excel_tables(
+        table_a_file='example_table_a.xlsx',
+        table_a_sheet='Sheet1',
+        table_b_file='example_table_b_diff.xlsx',
+        table_b_sheet='Sheet1',
+        match_columns={'ID': '员工编号', '部门': '岗位'},  # 列名映射（新格式）
+        table_a_extra_columns=['姓名', '年龄', '入职日期'],  # 表A额外列
+        table_b_extra_columns=['薪酬', '评级'],  # 表B额外列
+        output_file='example_merge_result2.xlsx',
+        string_columns=['ID', '员工编号']  # 保持字符串格式
+    )
+
+    print("\n合并示例完成！")
 
     print("\n合并结果:")
     print(result)
