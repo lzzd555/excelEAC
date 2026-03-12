@@ -204,13 +204,18 @@ def parse_formula_references(formula: str) -> List[Tuple[str, str, str]]:
         formula: Excel公式字符串
 
     Returns:
-        List[Tuple[str, str, str]]: [(sheet别名, 列字母, 行号), ...]
+        List[Tuple[str, str, str]]: [(sheet名/别名, 列字母, 行号), ...]
     """
-    # 匹配模式: sheet0!A1, sheet1!B2 等
-    pattern = r"(sheet\d+)!([A-Z]+)(\d+)"
+    # 匹配模式: sheet0!A1, Sheet1!B2, 'MySheet'!C3 等
+    pattern = r"(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))!([A-Z]+)(\d+)"
     matches = re.findall(pattern, formula, re.IGNORECASE)
 
-    return [(m[0].lower(), m[1].upper(), int(m[2])) for m in matches]
+    results = []
+    for m in matches:
+        sheet_name = m[0] if m[0] else m[1]  # 带引号的sheet名或不带引号的
+        results.append((sheet_name.lower(), m[2].upper(), int(m[3])))
+
+    return results
 
 
 def replace_sheet_references(
@@ -223,79 +228,109 @@ def replace_sheet_references(
 
     Args:
         formula: 原始公式字符串
-        alias_to_info: 别名到文件信息的映射 {alias: {'file_path': str, 'sheet_name': str}}
+        alias_to_info: sheet名到文件信息的映射 {sheet_name: {'file_path': str, 'sheet_name': str}}
+                       key可以是别名或实际的sheet名
         row_offset: 行号偏移量（用于调整输出行号）
 
     Returns:
         str: 替换后的公式
-        格式: sheet0!A1 -> '[filename.xlsx]actual_sheet_name'!A1
-             sheet0!A:A -> '[filename.xlsx]actual_sheet_name'!A:A (整列引用)
+        格式: SheetName!A1 -> '[filename.xlsx]SheetName'!A1
+             'Sheet-Name'!A:A -> '[filename.xlsx]Sheet-Name'!A:A
     """
     # 匹配sheet引用，支持多种格式：
-    # - sheet0!A1 (单元格)
-    # - sheet0!A:A (整列)
-    # - sheet0!A1:A10 (列范围)
-    # - sheet0!A1:B10 (单元格范围)
-    sheet_pattern = r"(sheet\d+)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
+    # - sheet0!A1 或 Sheet1!A1 (不带引号的sheet名)
+    # - 'ESDP-Bpart'!A:A (带单引号的sheet名)
+    # - 单元格引用: A1
+    # - 整列引用: A:A
+    # - 范围引用: A1:A10, A1:B10
 
-    def replace_sheet_match(match):
-        alias = match.group(1).lower()
+    # 匹配带单引号的sheet名: 'SheetName'!CellRef
+    quoted_pattern = r"'([^']+)'!([A-Z]+\d*(?::[A-Z]*\d*)?)"
+
+    # 匹配不带单引号的sheet名: SheetName!CellRef (sheet名由字母、数字、下划线组成)
+    unquoted_pattern = r"([A-Za-z_][A-Za-z0-9_]*)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
+
+    def adjust_cell_ref(cell_ref: str) -> str:
+        """调整单元格引用的行号"""
+        if ':' in cell_ref:
+            parts = cell_ref.split(':')
+            adjusted_parts = []
+            for part in parts:
+                col_match = re.match(r'([A-Z]+)(\d*)', part)
+                if col_match:
+                    col = col_match.group(1)
+                    row_str = col_match.group(2)
+                    if row_str:
+                        row = int(row_str) + row_offset
+                        adjusted_parts.append(f"{col}{row}")
+                    else:
+                        adjusted_parts.append(col)
+                else:
+                    adjusted_parts.append(part)
+            return ':'.join(adjusted_parts)
+        else:
+            col_match = re.match(r'([A-Z]+)(\d+)', cell_ref)
+            if col_match:
+                col = col_match.group(1)
+                row = int(col_match.group(2)) + row_offset
+                return f"{col}{row}"
+            return cell_ref
+
+    def find_matching_info(sheet_name: str):
+        """查找匹配的sheet信息（支持别名和实际sheet名）"""
+        sheet_name_lower = sheet_name.lower()
+
+        # 1. 首先尝试精确匹配（不区分大小写）
+        for key, info in alias_to_info.items():
+            if key.lower() == sheet_name_lower:
+                return info
+
+        # 2. 尝试匹配实际的sheet名
+        for key, info in alias_to_info.items():
+            if info.get('sheet_name', '').lower() == sheet_name_lower:
+                return info
+
+        return None
+
+    def replace_quoted_match(match):
+        sheet_name = match.group(1)
         cell_ref = match.group(2).upper()
 
-        if alias in alias_to_info:
-            info = alias_to_info[alias]
+        info = find_matching_info(sheet_name)
+        if info:
             file_path = info['file_path']
             actual_sheet_name = info['sheet_name']
             file_name = os.path.basename(file_path)
-
-            # 处理单元格引用，调整行号
-            # 检查是否是整列引用 (如 A:A) 或范围引用 (如 A1:B10)
-            if ':' in cell_ref:
-                # 范围引用，需要处理两部分
-                parts = cell_ref.split(':')
-                adjusted_parts = []
-
-                for part in parts:
-                    # 提取列字母和行号
-                    col_match = re.match(r'([A-Z]+)(\d*)', part)
-                    if col_match:
-                        col = col_match.group(1)
-                        row_str = col_match.group(2)
-                        if row_str:
-                            # 有行号，需要调整
-                            row = int(row_str) + row_offset
-                            adjusted_parts.append(f"{col}{row}")
-                        else:
-                            # 只有列字母（整列引用），不调整
-                            adjusted_parts.append(col)
-                    else:
-                        adjusted_parts.append(part)
-
-                adjusted_ref = ':'.join(adjusted_parts)
-            else:
-                # 单个单元格引用
-                col_match = re.match(r'([A-Z]+)(\d+)', cell_ref)
-                if col_match:
-                    col = col_match.group(1)
-                    row = int(col_match.group(2)) + row_offset
-                    adjusted_ref = f"{col}{row}"
-                else:
-                    # 只有列字母，不调整
-                    adjusted_ref = cell_ref
-
+            adjusted_ref = adjust_cell_ref(cell_ref)
             return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
-        else:
-            return match.group(0)
+        return match.group(0)
 
-    result = re.sub(sheet_pattern, replace_sheet_match, formula, flags=re.IGNORECASE)
+    def replace_unquoted_match(match):
+        sheet_name = match.group(1)
+        cell_ref = match.group(2).upper()
 
-    # 然后调整本地单元格引用的行号（不包含sheet引用的）
+        info = find_matching_info(sheet_name)
+        if info:
+            file_path = info['file_path']
+            actual_sheet_name = info['sheet_name']
+            file_name = os.path.basename(file_path)
+            adjusted_ref = adjust_cell_ref(cell_ref)
+            return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
+        return match.group(0)
+
+    # 先处理带单引号的sheet名
+    result = re.sub(quoted_pattern, replace_quoted_match, formula, flags=re.IGNORECASE)
+
+    # 再处理不带单引号的sheet名
+    result = re.sub(unquoted_pattern, replace_unquoted_match, result, flags=re.IGNORECASE)
+
+    # 调整本地单元格引用的行号（不包含sheet引用的）
     def adjust_local_ref(match):
         col = match.group(1)
         row = int(match.group(2)) + row_offset
         return f"{col}{row}"
 
-    # 匹配本地单元格引用（不在单引号内，不跟在sheet后面的）
+    # 匹配本地单元格引用（不在单引号内，不跟在sheet名后面的）
     local_pattern = r"(?<![A-Za-z!'\"\\])([A-Z]+)(\d+)(?![A-Za-z])"
     result = re.sub(local_pattern, adjust_local_ref, result)
 
@@ -464,11 +499,18 @@ def generate_excel_from_template(
         df = read_data_source(config, string_columns)
         loaded_data_sources.append((config.alias, df))
 
-        # 记录别名到文件信息和sheet名称的映射
-        alias_to_info[config.alias.lower()] = {
+        # 构建info字典
+        info = {
             'file_path': config.file_path,
             'sheet_name': config.sheet_name
         }
+
+        # 记录别名到文件信息的映射（如果有别名）
+        if config.alias:
+            alias_to_info[config.alias.lower()] = info
+
+        # 同时记录实际sheet名到文件信息的映射（支持模板中直接使用实际sheet名）
+        alias_to_info[config.sheet_name.lower()] = info
 
     print()
 
