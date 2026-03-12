@@ -229,37 +229,73 @@ def replace_sheet_references(
     Returns:
         str: 替换后的公式
         格式: sheet0!A1 -> '[filename.xlsx]actual_sheet_name'!A1
+             sheet0!A:A -> '[filename.xlsx]actual_sheet_name'!A:A (整列引用)
     """
-    # 首先替换带sheet引用的单元格
+    # 匹配sheet引用，支持多种格式：
+    # - sheet0!A1 (单元格)
+    # - sheet0!A:A (整列)
+    # - sheet0!A1:A10 (列范围)
+    # - sheet0!A1:B10 (单元格范围)
+    sheet_pattern = r"(sheet\d+)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
+
     def replace_sheet_match(match):
         alias = match.group(1).lower()
-        col = match.group(2).upper()
-        row = int(match.group(3)) + row_offset
+        cell_ref = match.group(2).upper()
 
         if alias in alias_to_info:
             info = alias_to_info[alias]
             file_path = info['file_path']
             actual_sheet_name = info['sheet_name']
-            # 获取文件名
             file_name = os.path.basename(file_path)
-            # 构建外部引用格式（使用实际的sheet名称）
-            return f"'[{file_name}]{actual_sheet_name}'!{col}{row}"
+
+            # 处理单元格引用，调整行号
+            # 检查是否是整列引用 (如 A:A) 或范围引用 (如 A1:B10)
+            if ':' in cell_ref:
+                # 范围引用，需要处理两部分
+                parts = cell_ref.split(':')
+                adjusted_parts = []
+
+                for part in parts:
+                    # 提取列字母和行号
+                    col_match = re.match(r'([A-Z]+)(\d*)', part)
+                    if col_match:
+                        col = col_match.group(1)
+                        row_str = col_match.group(2)
+                        if row_str:
+                            # 有行号，需要调整
+                            row = int(row_str) + row_offset
+                            adjusted_parts.append(f"{col}{row}")
+                        else:
+                            # 只有列字母（整列引用），不调整
+                            adjusted_parts.append(col)
+                    else:
+                        adjusted_parts.append(part)
+
+                adjusted_ref = ':'.join(adjusted_parts)
+            else:
+                # 单个单元格引用
+                col_match = re.match(r'([A-Z]+)(\d+)', cell_ref)
+                if col_match:
+                    col = col_match.group(1)
+                    row = int(col_match.group(2)) + row_offset
+                    adjusted_ref = f"{col}{row}"
+                else:
+                    # 只有列字母，不调整
+                    adjusted_ref = cell_ref
+
+            return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
         else:
-            # 如果没有找到对应的路径，保持原样
             return match.group(0)
 
-    sheet_pattern = r"(sheet\d+)!([A-Z]+)(\d+)"
     result = re.sub(sheet_pattern, replace_sheet_match, formula, flags=re.IGNORECASE)
 
     # 然后调整本地单元格引用的行号（不包含sheet引用的）
-    # 例如 B2 -> B3, C2 -> C3 等
     def adjust_local_ref(match):
         col = match.group(1)
         row = int(match.group(2)) + row_offset
         return f"{col}{row}"
 
     # 匹配本地单元格引用（不在单引号内，不跟在sheet后面的）
-    # 使用负向前瞻确保后面没有更多的字母（避免匹配部分sheet名）
     local_pattern = r"(?<![A-Za-z!'\"\\])([A-Z]+)(\d+)(?![A-Za-z])"
     result = re.sub(local_pattern, adjust_local_ref, result)
 
