@@ -101,6 +101,12 @@ def read_data_source(
 
     df = pd.read_excel(config.file_path, sheet_name=config.sheet_name, dtype=dtype_dict)
 
+    # 如果没有列映射，说明这个数据源只用于公式引用，不需要提取数据列
+    if not config.column_mappings:
+        print(f"数据源 '{config.alias}' 仅用于公式引用，不提取数据列")
+        # 返回一个空的DataFrame，但保持正确的行数
+        return pd.DataFrame(index=range(len(df)))
+
     # 验证源列是否存在
     source_columns = [m.source_column for m in config.column_mappings]
     missing_cols = [col for col in source_columns if col not in df.columns]
