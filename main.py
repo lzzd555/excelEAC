@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from modules.validation import process_excel_with_validation
 from modules.merge import merge_excel_tables
+from modules.template_generator import generate_excel_from_template, parse_column_mappings
 
 
 def run_validation(args):
@@ -112,6 +113,68 @@ def run_merge(args):
         sys.exit(1)
 
 
+def run_template(args):
+    """运行模板生成功能"""
+    print("=== 模板生成模式 ===\n")
+
+    try:
+        # 解析数据源参数
+        # 格式: file_path sheet_name column_mappings alias
+        # 例如: sales.xlsx Sheet1 "SalesAmt:Sales,Date:Date" sheet0
+        data_sources = []
+
+        if args.data_source:
+            for ds_args in args.data_source:
+                if len(ds_args) < 4:
+                    print(f"错误: 数据源参数不完整: {ds_args}")
+                    print("格式: file_path sheet_name column_mappings alias")
+                    sys.exit(1)
+
+                file_path = ds_args[0]
+                sheet_name = ds_args[1]
+                column_mappings_str = ds_args[2]
+                alias = ds_args[3]
+
+                # 解析列映射
+                column_mappings = parse_column_mappings(column_mappings_str)
+
+                data_sources.append({
+                    'file_path': file_path,
+                    'sheet_name': sheet_name,
+                    'column_mappings': column_mappings,
+                    'alias': alias
+                })
+
+        if not data_sources:
+            print("错误: 至少需要一个数据源")
+            sys.exit(1)
+
+        # 解析公式列
+        formula_columns = args.formula_columns.split(',') if args.formula_columns else []
+
+        # 解析字符串列
+        string_columns = args.string_columns.split(',') if args.string_columns else None
+
+        result = generate_excel_from_template(
+            template_file=args.template,
+            template_sheet=args.template_sheet,
+            formula_columns=formula_columns,
+            data_sources=data_sources,
+            output_file=args.output,
+            string_columns=string_columns,
+            use_external_refs=not args.direct_values
+        )
+
+        print("\n生成完成！")
+        print(f"输出文件: {args.output}")
+        print("\n生成结果:")
+        print(result)
+
+    except Exception as e:
+        print(f"\n❌ 模板生成失败: {e}")
+        sys.exit(1)
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
@@ -127,6 +190,12 @@ def main():
 
   表合并（不同列名）:
     python main.py merge -a table_a.xlsx -A Sheet1 -b table_b.xlsx -B Sheet1 -m "ID:员工编号,部门:部门编码" -a_extra 姓名,职位 -b_extra 薪资,入职日期 -o merged.xlsx
+
+  模板生成:
+    python main.py template -t template.xlsx -ts Sheet1 -f "Total,Profit" \\
+        -d sales.xlsx Sheet1 "SalesAmt:Sales,Date:Date" sheet0 \\
+        -d costs.xlsx Sheet1 "CostAmt:Cost,Date:Date" sheet1 \\
+        -o result.xlsx
         '''
     )
 
@@ -156,6 +225,19 @@ def main():
     merge_parser.add_argument('-o', '--output', default='merge_result.xlsx', help='输出文件名')
     merge_parser.add_argument('--string-columns', help='字符串列名（逗号分隔）')
 
+    # 模板生成命令
+    template_parser = subparsers.add_parser('template', help='基于模板生成Excel')
+    template_parser.add_argument('-t', '--template', required=True, help='模板Excel文件路径')
+    template_parser.add_argument('-ts', '--template-sheet', required=True, help='模板工作表名称')
+    template_parser.add_argument('-f', '--formula-columns', default='', help='公式列名（逗号分隔）')
+    template_parser.add_argument('-d', '--data-source', action='append', nargs=4,
+                                  metavar=('FILE', 'SHEET', 'MAPPINGS', 'ALIAS'),
+                                  help='数据源（可多次使用）。格式: file_path sheet_name "SrcCol:TgtCol,..." alias')
+    template_parser.add_argument('-o', '--output', default='output.xlsx', help='输出文件名')
+    template_parser.add_argument('--string-columns', help='字符串列名（逗号分隔）')
+    template_parser.add_argument('--direct-values', action='store_true',
+                                  help='直接写入数据值而非外部引用公式（适用于Numbers等不支持外部引用的软件）')
+
     # 解析参数
     args = parser.parse_args()
 
@@ -164,6 +246,8 @@ def main():
         run_validation(args)
     elif args.command == 'merge':
         run_merge(args)
+    elif args.command == 'template':
+        run_template(args)
     else:
         parser.print_help()
 
