@@ -505,27 +505,6 @@ def replace_sheet_references(
         actual_sheet_name = extract_sheet_name(sheet_name)
         actual_sheet_name_lower = actual_sheet_name.lower()
 
-        # 提取方括号中的索引号（如 [0], [1], [3] 等）
-        bracket_match = re.match(r'\[(\d+)\]', sheet_name)
-        if bracket_match:
-            index = bracket_match.group(1)
-
-            # 如果有外部链接映射，使用索引号查找对应的数据源
-            if external_links and index in external_links:
-                external_filename = external_links[index].lower()
-
-                # 查找文件名匹配的数据源
-                for key, info in alias_to_info.items():
-                    if external_filename in os.path.basename(info['file_path']).lower():
-                        return info
-
-                # 如果没有找到匹配的数据源，尝试使用索引号作为 data_sources 的索引
-                if index in alias_to_info:
-                    return alias_to_info[index]
-            elif index in alias_to_info:
-                # 直接用索引号查找（作为 data_sources 的索引）
-                return alias_to_info[index]
-
         # 1. 首先尝试精确匹配（不区分大小写）
         for key, info in alias_to_info.items():
             if key.lower() == actual_sheet_name_lower:
@@ -551,6 +530,27 @@ def replace_sheet_references(
             return matching_infos[0][1]
         elif matching_infos:
             return matching_infos[0][1]
+        
+        # 提取方括号中的索引号（如 [0], [1], [3] 等）
+        bracket_match = re.match(r'\[(\d+)\]', sheet_name)
+        if bracket_match:
+            index = bracket_match.group(1)
+
+            # 如果有外部链接映射，使用索引号查找对应的数据源
+            if external_links and index in external_links:
+                external_filename = external_links[index].lower()
+
+                # 查找文件名匹配的数据源
+                for key, info in alias_to_info.items():
+                    if external_filename in os.path.basename(info['file_path']).lower():
+                        return info
+
+                # 如果没有找到匹配的数据源，尝试使用索引号作为 data_sources 的索引
+                if index in alias_to_info:
+                    return alias_to_info[index]
+            elif index in alias_to_info:
+                # 直接用索引号查找（作为 data_sources 的索引）
+                return alias_to_info[index]
 
         return None
 
