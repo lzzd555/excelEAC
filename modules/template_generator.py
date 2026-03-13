@@ -254,6 +254,7 @@ def replace_sheet_references(
     # - sheet0!A1 或 Sheet1!A1 (不带引号的sheet名)
     # - 'ESDP-Bpart'!A:A (带单引号的sheet名)
     # - '[sales.xlsx]Sheet1'!A1 (带文件路径的sheet名)
+    # - [3]SheetName!A1 (Excel外部引用索引格式)
     # - 单元格引用: A1
     # - 整列引用: A:A
     # - 范围引用: A1:A10, A1:B10
@@ -261,7 +262,10 @@ def replace_sheet_references(
     # 匹配带单引号的sheet名（可能包含文件路径）: 'SheetName'!CellRef 或 '[filename]SheetName'!CellRef
     quoted_pattern = r"'([^']+)'!([A-Z]+\d*(?::[A-Z]*\d*)?)"
 
-    # 匹配不带单引号的sheet名: SheetName!CellRef (sheet名由字母、数字、下划线组成)
+    # 匹配带方括号但无单引号的格式: [xxx]SheetName!CellRef (Excel外部引用索引格式)
+    bracket_pattern = r"(\[[^\]]+\][^!'\s]+)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
+
+    # 匹配不带单引号和方括号的sheet名: SheetName!CellRef (sheet名由字母、数字、下划线组成)
     unquoted_pattern = r"([A-Za-z_][A-Za-z0-9_]*)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
 
     def adjust_cell_ref(cell_ref: str) -> str:
@@ -294,9 +298,11 @@ def replace_sheet_references(
         """
         从完整引用中提取实际的sheet名
         例如: '[sales.xlsx]Sheet1' -> 'Sheet1'
+              '[3]Sheet1' -> 'Sheet1'  (Excel外部引用索引格式)
               'ESDP-Bpart' -> 'ESDP-Bpart'
         """
-        # 检查是否包含文件路径格式 [filename]sheetname
+        # 检查是否包含方括号格式 [xxx]sheetname
+        # 包括: [filename.xlsx], [数字索引]
         bracket_match = re.match(r'\[.+\](.+)', full_reference)
         if bracket_match:
             return bracket_match.group(1)
@@ -346,10 +352,27 @@ def replace_sheet_references(
             return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
         return match.group(0)
 
+    def replace_bracket_match(match):
+        """处理 [xxx]SheetName!CellRef 格式（Excel外部引用索引格式）"""
+        full_reference = match.group(1)  # 例如: [3]合同汇总分析表
+        cell_ref = match.group(2).upper()
+
+        info = find_matching_info(full_reference)
+        if info:
+            file_path = info['file_path']
+            actual_sheet_name = info['sheet_name']
+            file_name = os.path.basename(file_path)
+            adjusted_ref = adjust_cell_ref(cell_ref)
+            return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
+        return match.group(0)
+
     # 先处理带单引号的sheet名
     result = re.sub(quoted_pattern, replace_quoted_match, formula, flags=re.IGNORECASE)
 
-    # 再处理不带单引号的sheet名
+    # 处理带方括号但无单引号的格式（Excel外部引用索引格式）
+    result = re.sub(bracket_pattern, replace_bracket_match, result, flags=re.IGNORECASE)
+
+    # 最后处理不带单引号和方括号的sheet名
     result = re.sub(unquoted_pattern, replace_unquoted_match, result, flags=re.IGNORECASE)
 
     # 调整本地单元格引用的行号（不包含sheet引用的）
