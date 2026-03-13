@@ -6,11 +6,12 @@ Excel模板生成器模块
 import pandas as pd
 import openpyxl
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, Fill, Border, Alignment, Protection, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protection
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import os
 import re
+import copy
 
 
 @dataclass
@@ -51,28 +52,75 @@ def copy_cell_style(source_cell, target_cell) -> None:
     if source_cell.has_style:
         # 复制字体
         if source_cell.font:
-            target_cell.font = Font(
-                name=source_cell.font.name,
-                size=source_cell.font.size,
-                bold=source_cell.font.bold,
-                italic=source_cell.font.italic,
-                vertAlign=source_cell.font.vertAlign,
-                underline=source_cell.font.underline,
-                strike=source_cell.font.strike,
-                color=source_cell.font.color
-            )
+            # 安全地复制字体样式
+            font_args = {
+                'name': source_cell.font.name,
+                'size': source_cell.font.size,
+                'bold': source_cell.font.bold,
+                'italic': source_cell.font.italic,
+                'vertAlign': source_cell.font.vertAlign,
+                'underline': source_cell.font.underline,
+                'strike': source_cell.font.strike,
+            }
 
-        # 复制填充
-        if source_cell.fill and source_cell.fill.fill_type:
-            fill_type = source_cell.fill.fill_type
-            fg_color = source_cell.fill.fgColor
-            bg_color = source_cell.fill.bgColor
-            if fill_type and fg_color:
-                target_cell.fill = PatternFill(
-                    fill_type=fill_type,
-                    start_color=fg_color.rgb if fg_color.rgb else fg_color.idx,
-                    end_color=bg_color.rgb if bg_color else None
-                )
+            # 处理颜色
+            if source_cell.font.color and hasattr(source_cell.font.color, 'rgb'):
+                font_args['color'] = source_cell.font.color
+            else:
+                # 默认黑色
+                from openpyxl.styles.colors import Color
+                font_args['color'] = Color(rgb='FF0000')
+
+            target_cell.font = Font(**font_args)
+
+        # 复制填充样式 - 基于调试结果优化的方法
+        if source_cell.fill:
+            try:
+                fill_type = source_cell.fill.fill_type
+
+                # 特殊处理：无填充在 openpyxl 中表现为 None
+                if fill_type is None:
+                    target_cell.fill = PatternFill(fill_type='none')
+                elif fill_type == 'none':
+                    target_cell.fill = PatternFill(fill_type='none')
+                elif fill_type == 'gray125':
+                    target_cell.fill = PatternFill(fill_type='gray125')
+                elif fill_type == 'gray0625':
+                    target_cell.fill = PatternFill(fill_type='gray0625')
+                elif fill_type == 'solid':
+                    # 对于实心填充，使用最简单的方法
+                    if source_cell.fill.start_color:
+                        # 获取RGB值
+                        if hasattr(source_cell.fill.start_color, 'rgb'):
+                            rgb_value = source_cell.fill.start_color.rgb
+                            if rgb_value:
+                                target_cell.fill = PatternFill(
+                                    fill_type='solid',
+                                    start_color=rgb_value,
+                                    end_color=rgb_value
+                                )
+                            else:
+                                # 无RGB值，默认白色
+                                target_cell.fill = PatternFill(fill_type='solid', start_color='FFFFFF')
+                        else:
+                            # 没有rgb属性，默认白色
+                            target_cell.fill = PatternFill(fill_type='solid', start_color='FFFFFF')
+                    else:
+                        # 无颜色，默认白色
+                        target_cell.fill = PatternFill(fill_type='solid', start_color='FFFFFF')
+                else:
+                    # 其他填充类型，直接尝试复制类型
+                    target_cell.fill = PatternFill(fill_type=fill_type)
+
+            except Exception as e:
+                # 如果上述方法失败，尝试更简单的方法
+                try:
+                    if fill_type is None:
+                        target_cell.fill = PatternFill(fill_type='none')
+                    else:
+                        target_cell.fill = PatternFill(fill_type=fill_type)
+                except Exception as e2:
+                    print(f"⚠️ 跳过填充样式复制（错误: {e}）")
 
         # 复制边框
         if source_cell.border:
