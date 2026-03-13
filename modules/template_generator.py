@@ -121,6 +121,12 @@ def read_data_source(
     target_columns = [m.target_column for m in config.column_mappings]
     df = df[[col for col in target_columns if col in df.columns]]
 
+    # 确保字符串列保持字符串格式（防止前置零丢失）
+    if string_columns:
+        for col in string_columns:
+            if col in df.columns:
+                df[col] = df[col].astype('string')
+
     print(f"数据源 '{config.alias}' 数据: {len(df)} 行, {len(df.columns)} 列")
 
     return df
