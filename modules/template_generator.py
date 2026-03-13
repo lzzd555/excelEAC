@@ -335,22 +335,25 @@ def parse_formula_references(formula: str) -> List[Tuple[str, str, str]]:
 def replace_sheet_references(
     formula: str,
     alias_to_info: Dict[str, Dict[str, str]],
-    row_offset: int = 0
+    row_offset: int = 0,
+    output_file_path: Optional[str] = None
 ) -> str:
     """
     替换公式中的sheet引用为外部文件引用，并调整行号
 
     Args:
         formula: 原始公式字符串
-        alias_to_info: sheet名到文件信息的映射 {sheet_name: {'file_path': str, 'sheet_name': str}}
-                       key可以是别名或实际的sheet名
+        alias_to_info: sheet名到文件信息的映射 {sheet_name: {'file_path': str, 'sheet_name': str, 'is_template_self_reference': bool}}
+                       key可以是别名、实际的sheet名或模板sheet名
         row_offset: 行号偏移量（用于调整输出行号）
+        output_file_path: 输出文件的完整路径。如果引用的是输出文件自身，则返回本地引用格式
 
     Returns:
         str: 替换后的公式
         格式: SheetName!A1 -> '[filename.xlsx]SheetName'!A1
              'Sheet-Name'!A:A -> '[filename.xlsx]Sheet-Name'!A:A
              '[old.xlsx]SheetName'!A1 -> '[new.xlsx]SheetName'!A1
+             如果引用的是输出文件自身，则返回本地引用: SheetName!A1
     """
     # 匹配sheet引用，支持多种格式：
     # - sheet0!A1 或 Sheet1!A1 (不带引号的sheet名)
@@ -411,10 +414,18 @@ def replace_sheet_references(
         return full_reference
 
     def find_matching_info(sheet_name: str):
-        """查找匹配的sheet信息（支持别名和实际sheet名）"""
+        """查找匹配的sheet信息（支持别名、实际sheet名和数字索引）"""
         # 首先提取实际的sheet名（去掉可能存在的文件路径）
         actual_sheet_name = extract_sheet_name(sheet_name)
         actual_sheet_name_lower = actual_sheet_name.lower()
+
+        # 提取方括号中的索引号（如 [0], [1], [3] 等）
+        bracket_match = re.match(r'\[(\d+)\]', sheet_name)
+        if bracket_match:
+            index = bracket_match.group(1)
+            # 直接用索引号查找
+            if index in alias_to_info:
+                return alias_to_info[index]
 
         # 1. 首先尝试精确匹配（不区分大小写）
         for key, info in alias_to_info.items():
@@ -436,9 +447,21 @@ def replace_sheet_references(
         if info:
             file_path = info['file_path']
             actual_sheet_name = info['sheet_name']
-            file_name = os.path.basename(file_path)
             adjusted_ref = adjust_cell_ref(cell_ref)
-            return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
+
+            # 检查是否是本地引用（输出文件自身或模板自引用）
+            is_local = (
+                (output_file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
+                info.get('is_template_self_reference', False)
+            )
+
+            if is_local:
+                # 返回本地引用格式
+                return f"'{actual_sheet_name}'!{adjusted_ref}"
+            else:
+                # 返回外部引用格式
+                file_name = os.path.basename(file_path)
+                return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
         return match.group(0)
 
     def replace_unquoted_match(match):
@@ -449,9 +472,25 @@ def replace_sheet_references(
         if info:
             file_path = info['file_path']
             actual_sheet_name = info['sheet_name']
-            file_name = os.path.basename(file_path)
             adjusted_ref = adjust_cell_ref(cell_ref)
-            return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
+
+            # 检查是否是本地引用（输出文件自身或模板自引用）
+            is_local = (
+                (output_file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
+                info.get('is_template_self_reference', False)
+            )
+
+            if is_local:
+                # 返回本地引用格式
+                # 如果 sheet 名需要引号，使用引号
+                if any(c in actual_sheet_name for c in " -()&^%$#@!~`'\"\\"):
+                    return f"'{actual_sheet_name}'!{adjusted_ref}"
+                else:
+                    return f"{actual_sheet_name}!{adjusted_ref}"
+            else:
+                # 返回外部引用格式
+                file_name = os.path.basename(file_path)
+                return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
         return match.group(0)
 
     def replace_bracket_match(match):
@@ -463,9 +502,21 @@ def replace_sheet_references(
         if info:
             file_path = info['file_path']
             actual_sheet_name = info['sheet_name']
-            file_name = os.path.basename(file_path)
             adjusted_ref = adjust_cell_ref(cell_ref)
-            return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
+
+            # 检查是否是本地引用（输出文件自身或模板自引用）
+            is_local = (
+                (output_file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
+                info.get('is_template_self_reference', False)
+            )
+
+            if is_local:
+                # 返回本地引用格式
+                return f"'{actual_sheet_name}'!{adjusted_ref}"
+            else:
+                # 返回外部引用格式
+                file_name = os.path.basename(file_path)
+                return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
         return match.group(0)
 
     # 先处理带单引号的sheet名
@@ -495,7 +546,8 @@ def apply_formulas_to_output(
     formula_columns: List[str],
     formula_templates: Dict[str, str],
     alias_to_info: Dict[str, Dict[str, str]],
-    start_row: int = 2
+    start_row: int = 2,
+    output_file_path: Optional[str] = None
 ) -> None:
     """
     将公式应用到输出文件
@@ -506,6 +558,7 @@ def apply_formulas_to_output(
         formula_templates: 列名到公式模板的映射
         alias_to_info: 别名到文件信息的映射 {alias: {'file_path': str, 'sheet_name': str}}
         start_row: 开始应用公式的行号（默认为2，跳过标题行）
+        output_file_path: 输出文件的完整路径，用于检测本地引用
     """
     # 获取列名到列号的映射
     header_row = 1
@@ -533,7 +586,7 @@ def apply_formulas_to_output(
             row_offset = row_idx - start_row
 
             # 替换公式中的引用
-            new_formula = replace_sheet_references(formula_template, alias_to_info, row_offset)
+            new_formula = replace_sheet_references(formula_template, alias_to_info, row_offset, output_file_path)
 
             # 写入公式
             ws.cell(row=row_idx, column=col_idx).value = new_formula
@@ -634,7 +687,24 @@ def generate_excel_from_template(
     loaded_data_sources = []
     alias_to_info = {}
 
-    for ds in data_sources:
+    # 首先将输出 sheet 本身作为 0 号
+    output_sheet_info = {
+        'file_path': output_file,  # 输出文件路径
+        'sheet_name': '结果'  # 输出 sheet 名称
+    }
+    alias_to_info['0'] = output_sheet_info
+
+    # 记录模板 sheet 名称到输出 sheet 信息的映射
+    # 用于处理模板自引用的情况（模板中引用的是 template_sheet，应该映射到输出文件的 '结果' sheet）
+    template_sheet_info = {
+        'file_path': output_file,
+        'sheet_name': '结果',
+        'is_template_self_reference': True  # 标记这是模板自引用的映射
+    }
+    alias_to_info[template_sheet.lower()] = template_sheet_info
+
+    # 按顺序为数据源分配编号（从1开始）
+    for idx, ds in enumerate(data_sources, start=1):
         # 构建列映射
         column_mappings = [
             DataColumnMapping(source_column=m['source'], target_column=m['target'])
@@ -658,12 +728,21 @@ def generate_excel_from_template(
             'sheet_name': config.sheet_name
         }
 
+        # 记录数字索引（1, 2, 3...）到文件信息的映射
+        alias_to_info[str(idx)] = info
+
         # 记录别名到文件信息的映射（如果有别名）
         if config.alias:
             alias_to_info[config.alias.lower()] = info
 
         # 同时记录实际sheet名到文件信息的映射（支持模板中直接使用实际sheet名）
         alias_to_info[config.sheet_name.lower()] = info
+
+    # 打印数据源编号映射
+    print(f"   数据源编号映射:")
+    print(f"     [0] -> 输出文件: {os.path.basename(output_file)} (sheet: 结果)")
+    for idx, ds in enumerate(data_sources, start=1):
+        print(f"     [{idx}] -> {os.path.basename(ds['file_path'])} (sheet: {ds['sheet_name']})")
 
     print()
 
@@ -732,7 +811,8 @@ def generate_excel_from_template(
                     formula_columns,
                     template_formulas,
                     alias_to_info,
-                    start_row=2
+                    start_row=2,
+                    output_file_path=output_file
                 )
             else:
                 # 直接数据模式：只应用本地计算公式
@@ -757,7 +837,7 @@ def generate_excel_from_template(
                                     row_offset = row_idx - 2
                                     # 传入 alias_to_info 以支持 sheet 引用替换
                                     adjusted_formula = replace_sheet_references(
-                                        formula, alias_to_info, row_offset
+                                        formula, alias_to_info, row_offset, output_file
                                     )
                                     ws.cell(row=row_idx, column=col_idx).value = adjusted_formula
 
