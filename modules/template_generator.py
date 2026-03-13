@@ -783,6 +783,50 @@ def generate_excel_from_template(
 
     print(f"\n输出文件已保存: {output_file}")
 
+    # 打印最终文件中的公式汇总
+    print("\n" + "=" * 70)
+    print("最终文件公式汇总")
+    print("=" * 70)
+
+    # 重新读取输出文件，打印所有公式
+    try:
+        wb_output = openpyxl.load_workbook(output_file, data_only=False)
+        ws_output = wb_output.active
+
+        # 获取列名
+        header_row = 1
+        col_names = {}
+        for col_idx, cell in enumerate(ws_output[header_row], start=1):
+            if cell.value:
+                col_names[col_idx] = str(cell.value)
+
+        # 读取第二行的公式（代表所有行的公式模式）
+        formulas_in_output = {}
+        if ws_output.max_row >= 2:
+            for col_idx in range(1, ws_output.max_column + 1):
+                cell = ws_output.cell(row=2, column=col_idx)
+                if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
+                    col_name = col_names.get(col_idx, f"列{col_idx}")
+                    formulas_in_output[col_name] = cell.value
+
+        if formulas_in_output:
+            print(f"\n公式列数: {len(formulas_in_output)}")
+            for col_name, formula in formulas_in_output.items():
+                # 截断过长的公式
+                if len(formula) > 100:
+                    formula_display = formula[:100] + "..."
+                else:
+                    formula_display = formula
+                print(f"  {col_name}: {formula_display}")
+        else:
+            print("\n无公式列（所有数据均为直接值）")
+
+        wb_output.close()
+    except Exception as e:
+        print(f"   警告: 无法读取输出文件公式: {e}")
+
+    print("=" * 70)
+
     return merged_df
 
 
