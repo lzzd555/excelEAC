@@ -420,7 +420,8 @@ def replace_sheet_references(
     formula: str,
     alias_to_info: Dict[str, Dict[str, str]],
     row_offset: int = 0,
-    output_file_path: Optional[str] = None
+    output_file_path: Optional[str] = None,
+    external_links: Optional[Dict[int, str]] = None
 ) -> str:
     """
     替换公式中的sheet引用为外部文件引用，并调整行号
@@ -431,6 +432,7 @@ def replace_sheet_references(
                        key可以是别名、实际的sheet名或模板sheet名
         row_offset: 行号偏移量（用于调整输出行号）
         output_file_path: 输出文件的完整路径。如果引用的是输出文件自身，则返回本地引用格式
+        external_links: 外部链接映射 {索引号: 文件名}，用于匹配 Excel 索引号到实际数据源
 
     Returns:
         str: 替换后的公式
@@ -507,8 +509,21 @@ def replace_sheet_references(
         bracket_match = re.match(r'\[(\d+)\]', sheet_name)
         if bracket_match:
             index = bracket_match.group(1)
-            # 直接用索引号查找
-            if index in alias_to_info:
+
+            # 如果有外部链接映射，使用索引号查找对应的数据源
+            if external_links and index in external_links:
+                external_filename = external_links[index].lower()
+
+                # 查找文件名匹配的数据源
+                for key, info in alias_to_info.items():
+                    if external_filename in os.path.basename(info['file_path']).lower():
+                        return info
+
+                # 如果没有找到匹配的数据源，尝试使用索引号作为 data_sources 的索引
+                if index in alias_to_info:
+                    return alias_to_info[index]
+            elif index in alias_to_info:
+                # 直接用索引号查找（作为 data_sources 的索引）
                 return alias_to_info[index]
 
         # 1. 首先尝试精确匹配（不区分大小写）
@@ -517,9 +532,25 @@ def replace_sheet_references(
                 return info
 
         # 2. 尝试匹配实际的sheet名
+        matching_infos = []
         for key, info in alias_to_info.items():
             if info.get('sheet_name', '').lower() == actual_sheet_name_lower:
-                return info
+                matching_infos.append((key, info))
+
+        # 如果有多个匹配（sheet名称相同），尝试通过文件名匹配
+        if len(matching_infos) > 1:
+            # 提取引用中的文件名（如果有）
+            filename_match = re.search(r'\[([^\]]+)\]', sheet_name)
+            if filename_match:
+                filename = filename_match.group(1).lower()
+                # 查找文件名匹配的数据源
+                for key, info in matching_infos:
+                    if filename in os.path.basename(info['file_path']).lower():
+                        return info
+            # 如果没有找到文件名匹配，返回第一个匹配
+            return matching_infos[0][1]
+        elif matching_infos:
+            return matching_infos[0][1]
 
         return None
 
@@ -680,7 +711,8 @@ def apply_formulas_to_output(
     formula_templates: Dict[str, str],
     alias_to_info: Dict[str, Dict[str, str]],
     start_row: int = 2,
-    output_file_path: Optional[str] = None
+    output_file_path: Optional[str] = None,
+    external_links: Optional[Dict[int, str]] = None
 ) -> None:
     """
     将公式应用到输出文件
@@ -692,6 +724,7 @@ def apply_formulas_to_output(
         alias_to_info: 别名到文件信息的映射 {alias: {'file_path': str, 'sheet_name': str}}
         start_row: 开始应用公式的行号（默认为2，跳过标题行）
         output_file_path: 输出文件的完整路径，用于检测本地引用
+        external_links: 外部链接映射 {索引号: 文件名}
     """
     # 获取列名到列号的映射
     header_row = 1
@@ -719,7 +752,7 @@ def apply_formulas_to_output(
             row_offset = row_idx - start_row
 
             # 替换公式中的引用
-            new_formula = replace_sheet_references(formula_template, alias_to_info, row_offset, output_file_path)
+            new_formula = replace_sheet_references(formula_template, alias_to_info, row_offset, output_file_path, external_links)
 
             # 写入公式
             ws.cell(row=row_idx, column=col_idx).value = new_formula
@@ -801,6 +834,10 @@ def generate_excel_from_template(
 
     # 2. 模板分析：读取模板列名、顺序和公式模式
     print("2. 分析模板...")
+
+    # 读取外部链接映射
+    external_links = read_external_links(template_file)
+
     template_columns, formula_templates, template_ws = read_template_structure(template_file, template_sheet)
 
     # 收集模板中的公式（用于后续应用）
@@ -945,7 +982,8 @@ def generate_excel_from_template(
                     template_formulas,
                     alias_to_info,
                     start_row=2,
-                    output_file_path=output_file
+                    output_file_path=output_file,
+                    external_links=external_links
                 )
             else:
                 # 直接数据模式：只应用本地计算公式
@@ -970,7 +1008,7 @@ def generate_excel_from_template(
                                     row_offset = row_idx - 2
                                     # 传入 alias_to_info 以支持 sheet 引用替换
                                     adjusted_formula = replace_sheet_references(
-                                        formula, alias_to_info, row_offset, output_file
+                                        formula, alias_to_info, row_offset, output_file, external_links
                                     )
                                     ws.cell(row=row_idx, column=col_idx).value = adjusted_formula
 
