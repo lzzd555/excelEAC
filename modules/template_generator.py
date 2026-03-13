@@ -28,6 +28,69 @@ class DataSourceConfig:
     alias: str = ""                          # 别名（如"sheet0", "sheet1"）
 
 
+def read_external_links(xlsx_file: str) -> Dict[int, str]:
+    """
+    读取Excel文件中的外部链接映射
+
+    Excel会将外部引用的文件名替换为数字索引（如[3]SheetName）
+    这个函数从xlsx文件的内部XML结构中读取索引与文件名的映射关系
+
+    Args:
+        xlsx_file: Excel文件路径
+
+    Returns:
+        Dict[int, str]: {索引号: 文件名} 的映射字典
+    """
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    link_mapping = {}
+
+    try:
+        with zipfile.ZipFile(xlsx_file, 'r') as z:
+            # 检查是否有外部链接目录
+            external_links_dir = 'xl/externalLinks/'
+            link_files = [name for name in z.namelist() if name.startswith(external_links_dir) and name.endswith('.xml')]
+
+            for link_file in link_files:
+                try:
+                    content = z.read(link_file).decode('utf-8')
+                    root = ET.fromstring(content)
+
+                    # 提取索引号（从文件名 externalLink1.xml 中提取数字）
+                    import re as re_module
+                    match = re_module.search(r'externalLink(\d+)\.xml', link_file)
+                    if match:
+                        index = int(match.group(1))
+
+                        # 查找外部链接的文件路径
+                        # 命名空间可能是 http://schemas.openxmlformats.org/officeDocument/2006/relationships
+                        for elem in root.iter():
+                            # 查找包含 target 或 Target 属性的元素
+                            if 'Target' in elem.attrib:
+                                target = elem.attrib['Target']
+                                # 提取文件名（去掉路径）
+                                filename = os.path.basename(target)
+                                link_mapping[index] = filename
+                                break
+                            elif 'target' in elem.attrib:
+                                target = elem.attrib['target']
+                                filename = os.path.basename(target)
+                                link_mapping[index] = filename
+                                break
+                except Exception as e:
+                    print(f"   警告: 读取外部链接文件 {link_file} 失败: {e}")
+                    continue
+
+    except Exception as e:
+        print(f"   警告: 读取外部链接失败: {e}")
+
+    if link_mapping:
+        print(f"   外部链接映射: {link_mapping}")
+
+    return link_mapping
+
+
 def read_template_structure(
     template_file: str,
     template_sheet: str
@@ -43,6 +106,9 @@ def read_template_structure(
         Tuple[List[str], Dict[str, str]]: (列名列表, 列名到公式模板的映射)
     """
     print(f"正在读取模板: {template_file} 的 {template_sheet} 工作表...")
+
+    # 读取外部链接映射（索引号 -> 文件名）
+    external_links = read_external_links(template_file)
 
     # 使用openpyxl读取以保留公式
     wb = openpyxl.load_workbook(template_file, data_only=False)
@@ -66,7 +132,13 @@ def read_template_structure(
         for col_idx, col_name in enumerate(column_names, start=1):
             cell = ws.cell(row=2, column=col_idx)
             if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
-                formula_templates[col_name] = cell.value
+                formula = cell.value
+
+                # 如果有外部链接映射，替换公式中的索引号为实际文件名
+                if external_links:
+                    formula = replace_link_indices_with_filenames(formula, external_links)
+
+                formula_templates[col_name] = formula
 
     wb.close()
 
@@ -74,6 +146,36 @@ def read_template_structure(
     print(f"公式列: {list(formula_templates.keys())}")
 
     return column_names, formula_templates
+
+
+def replace_link_indices_with_filenames(formula: str, link_mapping: Dict[int, str]) -> str:
+    """
+    将公式中的外部链接索引号替换为实际文件名
+
+    例如: [3]SheetName!A:R -> [filename.xlsx]SheetName!A:R
+
+    Args:
+        formula: 原始公式字符串
+        link_mapping: {索引号: 文件名} 的映射字典
+
+    Returns:
+        str: 替换后的公式
+    """
+    import re as re_module
+
+    def replace_index(match):
+        index = int(match.group(1))
+        if index in link_mapping:
+            filename = link_mapping[index]
+            return f"[{filename}]"
+        return match.group(0)  # 如果没有找到映射，保持原样
+
+    # 匹配 [数字] 格式（如 [3], [4], [6]）
+    # 但不要匹配已经是文件名的情况（如 [sales.xlsx]）
+    pattern = r'\[(\d+)\](?![^\[]*\.xlsx)'
+
+    result = re_module.sub(pattern, replace_index, formula)
+    return result
 
 
 def read_data_source(
