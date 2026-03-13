@@ -6,6 +6,7 @@ Excel模板生成器模块
 import pandas as pd
 import openpyxl
 from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, Fill, Border, Alignment, Protection, PatternFill
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import os
@@ -26,6 +27,88 @@ class DataSourceConfig:
     sheet_name: str                          # sheet名称
     column_mappings: List[DataColumnMapping] # 列映射集合
     alias: str = ""                          # 别名（如"sheet0", "sheet1"）
+
+
+@dataclass
+class CellStyle:
+    """单元格样式"""
+    font: Optional[Dict[str, Any]] = None
+    fill: Optional[Dict[str, Any]] = None
+    border: Optional[Dict[str, Any]] = None
+    alignment: Optional[Dict[str, Any]] = None
+    number_format: Optional[str] = None
+    protection: Optional[Dict[str, Any]] = None
+
+
+def copy_cell_style(source_cell, target_cell) -> None:
+    """
+    复制单元格样式
+
+    Args:
+        source_cell: 源单元格
+        target_cell: 目标单元格
+    """
+    if source_cell.has_style:
+        # 复制字体
+        if source_cell.font:
+            target_cell.font = Font(
+                name=source_cell.font.name,
+                size=source_cell.font.size,
+                bold=source_cell.font.bold,
+                italic=source_cell.font.italic,
+                vertAlign=source_cell.font.vertAlign,
+                underline=source_cell.font.underline,
+                strike=source_cell.font.strike,
+                color=source_cell.font.color
+            )
+
+        # 复制填充
+        if source_cell.fill and source_cell.fill.fill_type:
+            fill_type = source_cell.fill.fill_type
+            fg_color = source_cell.fill.fgColor
+            bg_color = source_cell.fill.bgColor
+            if fill_type and fg_color:
+                target_cell.fill = PatternFill(
+                    fill_type=fill_type,
+                    start_color=fg_color.rgb if fg_color.rgb else fg_color.idx,
+                    end_color=bg_color.rgb if bg_color else None
+                )
+
+        # 复制边框
+        if source_cell.border:
+            target_cell.border = Border(
+                left=source_cell.border.left,
+                right=source_cell.border.right,
+                top=source_cell.border.top,
+                bottom=source_cell.border.bottom,
+                diagonal=source_cell.border.diagonal,
+                diagonal_direction=source_cell.border.diagonal_direction,
+                outline=source_cell.border.outline,
+                horizontal=source_cell.border.horizontal,
+                vertical=source_cell.border.vertical
+            )
+
+        # 复制对齐
+        if source_cell.alignment:
+            target_cell.alignment = Alignment(
+                horizontal=source_cell.alignment.horizontal,
+                vertical=source_cell.alignment.vertical,
+                text_rotation=source_cell.alignment.text_rotation,
+                wrap_text=source_cell.alignment.wrap_text,
+                shrink_to_fit=source_cell.alignment.shrink_to_fit,
+                indent=source_cell.alignment.indent
+            )
+
+        # 复制数字格式
+        if source_cell.number_format:
+            target_cell.number_format = source_cell.number_format
+
+        # 复制保护
+        if source_cell.protection:
+            target_cell.protection = Protection(
+                locked=source_cell.protection.locked,
+                hidden=source_cell.protection.hidden
+            )
 
 
 def read_external_links(xlsx_file: str) -> Dict[int, str]:
@@ -94,7 +177,7 @@ def read_external_links(xlsx_file: str) -> Dict[int, str]:
 def read_template_structure(
     template_file: str,
     template_sheet: str
-) -> Tuple[List[str], Dict[str, str]]:
+) -> Tuple[List[str], Dict[str, str], openpyxl.worksheet.worksheet.Worksheet]:
     """
     读取模板结构，包括列名、顺序和公式
 
@@ -103,7 +186,7 @@ def read_template_structure(
         template_sheet: 模板sheet名称
 
     Returns:
-        Tuple[List[str], Dict[str, str]]: (列名列表, 列名到公式模板的映射)
+        Tuple[List[str], Dict[str, str], Worksheet]: (列名列表, 列名到公式模板的映射, 模板工作表对象)
     """
     print(f"正在读取模板: {template_file} 的 {template_sheet} 工作表...")
 
@@ -140,12 +223,13 @@ def read_template_structure(
 
                 formula_templates[col_name] = formula
 
-    wb.close()
+    # 注意：不要关闭 wb，我们需要返回 ws 用于样式复制
+    # wb.close()
 
     print(f"模板列名: {column_names}")
     print(f"公式列: {list(formula_templates.keys())}")
 
-    return column_names, formula_templates
+    return column_names, formula_templates, ws
 
 
 def replace_link_indices_with_filenames(formula: str, link_mapping: Dict[int, str]) -> str:
@@ -541,6 +625,55 @@ def replace_sheet_references(
     return result
 
 
+def apply_template_styles(
+    output_ws: openpyxl.worksheet.worksheet.Worksheet,
+    template_ws: openpyxl.worksheet.worksheet.Worksheet,
+    column_names: List[str],
+    max_data_row: int
+) -> None:
+    """
+    将模板的样式应用到输出文件
+
+    Args:
+        output_ws: 输出工作表对象
+        template_ws: 模板工作表对象
+        column_names: 列名列表
+        max_data_row: 数据的最大行数
+    """
+    print("正在应用模板样式...")
+
+    # 应用标题行样式（第一行）
+    for col_idx, col_name in enumerate(column_names, start=1):
+        template_cell = template_ws.cell(row=1, column=col_idx)
+        output_cell = output_ws.cell(row=1, column=col_idx)
+
+        if template_cell.has_style:
+            copy_cell_style(template_cell, output_cell)
+
+    # 应用第二行的样式（数据样式模板）
+    for col_idx, col_name in enumerate(column_names, start=1):
+        template_cell = template_ws.cell(row=2, column=col_idx)
+
+        # 应用到所有数据行
+        for row_idx in range(2, max_data_row + 1):
+            output_cell = output_ws.cell(row=row_idx, column=col_idx)
+
+            if template_cell.has_style:
+                copy_cell_style(template_cell, output_cell)
+
+    # 复制列宽
+    for col_idx in range(1, template_ws.max_column + 1):
+        col_letter = get_column_letter(col_idx)
+        if template_ws.column_dimensions[col_letter].width:
+            output_ws.column_dimensions[col_letter].width = template_ws.column_dimensions[col_letter].width
+
+    # 复制行高（标题行）
+    if template_ws.row_dimensions[1].height:
+        output_ws.row_dimensions[1].height = template_ws.row_dimensions[1].height
+
+    print("✓ 模板样式应用完成")
+
+
 def apply_formulas_to_output(
     ws: openpyxl.worksheet.worksheet.Worksheet,
     formula_columns: List[str],
@@ -668,7 +801,7 @@ def generate_excel_from_template(
 
     # 2. 模板分析：读取模板列名、顺序和公式模式
     print("2. 分析模板...")
-    template_columns, formula_templates = read_template_structure(template_file, template_sheet)
+    template_columns, formula_templates, template_ws = read_template_structure(template_file, template_sheet)
 
     # 收集模板中的公式（用于后续应用）
     template_formulas = {}
@@ -843,6 +976,9 @@ def generate_excel_from_template(
 
                                 print(f"   已应用公式: {col} = {formula}")
 
+        # 应用模板样式
+        apply_template_styles(ws, template_ws, template_columns, len(output_df) + 1)
+
         # 处理字符串列格式
         if string_columns:
             from openpyxl.styles import Font
@@ -906,6 +1042,9 @@ def generate_excel_from_template(
         print(f"   警告: 无法读取输出文件公式: {e}")
 
     print("=" * 70)
+
+    # 关闭模板工作簿
+    template_ws.parent.close()
 
     return merged_df
 
