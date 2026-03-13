@@ -590,15 +590,19 @@ def generate_excel_from_template(
                     output_df[col] = None
         else:
             # 直接数据模式：保留数据值，只处理本地计算公式
-            # 找出哪些公式列包含外部引用（sheet0!, sheet1!等）
+            # 找出哪些公式列包含外部引用
+            # 外部引用格式包括: sheet0!, sheet1! 或 [N]SheetName! 或 '[file]Sheet'!
             external_ref_columns = []
             local_formula_columns = []
+
+            # 外部引用的正则模式
+            external_ref_pattern = r"(sheet\d+!|\[[^\]]+\][^!'\s]+!|'\[[^\]]+\][^']+'\!)"
 
             for col in formula_columns:
                 if col in template_formulas:
                     formula = template_formulas[col]
                     # 检查是否包含外部引用
-                    if re.search(r'sheet\d+!', formula, re.IGNORECASE):
+                    if re.search(external_ref_pattern, formula, re.IGNORECASE):
                         external_ref_columns.append(col)
                     else:
                         local_formula_columns.append(col)
@@ -630,11 +634,14 @@ def generate_excel_from_template(
                 )
             else:
                 # 直接数据模式：只应用本地计算公式
+                # 使用与前面相同的外部引用正则模式
+                external_ref_pattern = r"(sheet\d+!|\[[^\]]+\][^!'\s]+!|'\[[^\]]+\][^']+'\!)"
+
                 for col in formula_columns:
                     if col in template_formulas:
                         formula = template_formulas[col]
                         # 只处理不包含外部引用的公式
-                        if not re.search(r'sheet\d+!', formula, re.IGNORECASE):
+                        if not re.search(external_ref_pattern, formula, re.IGNORECASE):
                             # 获取列号
                             col_idx = None
                             for c_idx, c_name in enumerate(output_df.columns, start=1):
@@ -646,9 +653,9 @@ def generate_excel_from_template(
                                 # 为每一行应用公式
                                 for row_idx in range(2, ws.max_row + 1):
                                     row_offset = row_idx - 2
-                                    # 只调整本地引用的行号
+                                    # 传入 alias_to_info 以支持 sheet 引用替换
                                     adjusted_formula = replace_sheet_references(
-                                        formula, {}, row_offset
+                                        formula, alias_to_info, row_offset
                                     )
                                     ws.cell(row=row_idx, column=col_idx).value = adjusted_formula
 
