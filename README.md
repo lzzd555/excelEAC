@@ -1,6 +1,6 @@
 # Excel工具包
 
-一个提供数据验证和表合并功能的Python工具包，采用模块化设计。
+一个提供数据验证、表合并和模板生成功能的Python工具包，采用模块化设计。
 
 ## 功能特点
 
@@ -27,7 +27,22 @@
   - 自动去重和列排序
 - **数据类型保持**：支持字符串格式保持，避免"001"变成"1"
 - **多列匹配**：支持按多个列同时匹配数据
-- **列名映射**：支持表A和表B使用不同列名进行匹配（新功能）
+- **列名映射**：支持表A和表B使用不同列名进行匹配
+
+### 模板生成模块 (`modules/template_generator.py`)
+
+- **多数据源支持**：可从多个Excel文件读取数据，合并到输出文件
+- **公式保留与转换**：
+  - 保留模板中的公式结构
+  - 自动将sheet别名转换为外部文件引用（如 `sheet0!A1` → `'[data.xlsx]SheetName'!A1`）
+  - 支持复杂嵌套公式（IF、COUNTIFS、SUMIFS等）
+  - 支持整列引用（A:A）和范围引用（A1:B10）
+- **实际Sheet名支持**：模板中可直接使用实际sheet名（如 `'ESDP-Bpart'!A:A`），自动匹配对应文件
+- **列映射功能**：支持源列名到目标列名的映射
+- **两种数据写入模式**：
+  - 外部引用模式（默认）：使用Excel外部引用公式，数据与源文件保持链接
+  - 直接值模式（`--direct-values`）：直接写入数据值，适用于Numbers等不支持外部引用的软件
+- **公式仅数据源**：支持仅在公式中引用的数据源（无需列映射）
 
 ## 安装要求
 
@@ -42,6 +57,7 @@ pip install pandas openpyxl
 ```python
 from modules.validation import process_excel_with_validation
 from modules.merge import merge_excel_tables
+from modules.template_generator import generate_excel_from_template
 
 # 使用数据验证功能
 result = process_excel_with_validation(
@@ -76,6 +92,35 @@ merged = merge_excel_tables(
     table_b_extra_columns=['薪资', '入职日期'],
     output_file='merge_result.xlsx',
     string_columns=['ID', '员工编号']
+)
+
+# 使用模板生成功能
+result = generate_excel_from_template(
+    template_file='template.xlsx',
+    template_sheet='Sheet1',
+    formula_columns=['Sales', 'Cost', 'Profit'],
+    data_sources=[
+        {
+            'file_path': 'sales.xlsx',
+            'sheet_name': 'Data',
+            'column_mappings': [
+                {'source': 'Date', 'target': 'Date'},
+                {'source': 'SalesAmt', 'target': 'Sales'}
+            ],
+            'alias': 'sheet0'
+        },
+        {
+            'file_path': 'costs.xlsx',
+            'sheet_name': 'Data',
+            'column_mappings': [
+                {'source': 'Date', 'target': 'Date'},
+                {'source': 'CostAmt', 'target': 'Cost'}
+            ],
+            'alias': 'sheet1'
+        }
+    ],
+    output_file='result.xlsx',
+    string_columns=['Date']
 )
 ```
 
@@ -121,6 +166,24 @@ python main.py merge -a table_a.xlsx -A Sheet1 -b table_b.xlsx -B Sheet1 -m "ID:
 - `--table-b-extra-columns`: 表B额外列名，逗号分隔（可选）
 - `-o, --output`: 输出文件名（默认：merge_result.xlsx）
 - `--string-columns`: 字符串列名，逗号分隔（可选）
+
+#### 模板生成命令
+
+```bash
+python main.py template -t template.xlsx -ts Sheet1 -f "Sales,Cost,Profit" \
+    -d sales.xlsx Data "Date:Date,SalesAmt:Sales" sheet0 \
+    -d costs.xlsx Data "Date:Date,CostAmt:Cost" sheet1 \
+    -o result.xlsx
+```
+
+参数说明：
+- `-t, --template`: 模板Excel文件路径（必需）
+- `-ts, --template-sheet`: 模板工作表名称（必需）
+- `-f, --formula-columns`: 公式列名，逗号分隔（可选）
+- `-d, --data-source`: 数据源（可多次使用）。格式: `file_path sheet_name "SrcCol:TgtCol,..." alias`
+- `-o, --output`: 输出文件名（默认：output.xlsx）
+- `--string-columns`: 字符串列名，逗号分隔（可选）
+- `--direct-values`: 直接写入数据值而非外部引用公式（适用于Numbers等不支持外部引用的软件）
 
 ## 验证模块使用示例
 
@@ -217,6 +280,106 @@ result = merge_excel_tables(
 # 结果：只包含匹配列（ID, 日期）
 ```
 
+## 模板生成模块使用示例
+
+### 示例1：基本模板生成（使用别名）
+
+```python
+from modules.template_generator import generate_excel_from_template
+
+# 模板中的公式: =sheet0!B2+sheet1!B2
+result = generate_excel_from_template(
+    template_file='template.xlsx',
+    template_sheet='Sheet1',
+    formula_columns=['Total'],  # 包含公式的列
+    data_sources=[
+        {
+            'file_path': 'sales.xlsx',
+            'sheet_name': '销售数据',
+            'column_mappings': [
+                {'source': 'SalesAmt', 'target': 'Sales'}
+            ],
+            'alias': 'sheet0'  # 模板中引用的别名
+        },
+        {
+            'file_path': 'costs.xlsx',
+            'sheet_name': '成本数据',
+            'column_mappings': [
+                {'source': 'CostAmt', 'target': 'Cost'}
+            ],
+            'alias': 'sheet1'
+        }
+    ],
+    output_file='result.xlsx'
+)
+
+# 输出公式: ='[sales.xlsx]销售数据'!B2+'[costs.xlsx]成本数据'!B2
+```
+
+### 示例2：使用实际Sheet名（无需别名）
+
+```python
+# 模板中的公式: ='ESDP-Bpart'!A:A
+result = generate_excel_from_template(
+    template_file='template.xlsx',
+    template_sheet='分析',
+    formula_columns=['计算结果'],
+    data_sources=[
+        {
+            'file_path': 'data_a.xlsx',
+            'sheet_name': 'ESDP-Bpart',  # 直接使用实际sheet名
+            'column_mappings': []  # 可以为空，仅用于公式引用
+        }
+    ],
+    output_file='result.xlsx'
+)
+
+# 输出公式: ='[data_a.xlsx]ESDP-Bpart'!A:A
+```
+
+### 示例3：复杂嵌套公式
+
+```python
+# 模板中的复杂公式:
+# =IF(B2="新发货",
+#     SUMIFS(sheet0!C:C,sheet0!A:A,C2,sheet0!B:B,D2),
+#     SUMIFS(sheet1!C:C,sheet1!A:A,C2,sheet1!B:B,D2))
+
+result = generate_excel_from_template(
+    template_file='template.xlsx',
+    template_sheet='加载状态分析',
+    formula_columns=['计算结果'],
+    data_sources=[
+        {
+            'file_path': 'bpart.xlsx',
+            'sheet_name': 'ESDP-Bpart',
+            'column_mappings': [],
+            'alias': 'sheet0'
+        },
+        {
+            'file_path': 'cpart.xlsx',
+            'sheet_name': 'ESDP-Cpart',
+            'column_mappings': [],
+            'alias': 'sheet1'
+        }
+    ],
+    output_file='result.xlsx'
+)
+
+# 公式会被正确转换为外部文件引用
+```
+
+### 示例4：直接值模式（Numbers兼容）
+
+```bash
+# 使用 --direct-values 参数直接写入数据值
+python main.py template -t template.xlsx -ts Sheet1 \
+    -d sales.xlsx Data "SalesAmt:Sales" sheet0 \
+    -o result.xlsx --direct-values
+```
+
+```
+
 ## 参数说明
 
 ### 验证模块参数
@@ -245,6 +408,34 @@ result = merge_excel_tables(
 | table_b_extra_columns | List[str] | 否 | 从表B中额外添加的列名列表（除匹配列外） |
 | output_file | str | 否 | 输出文件名（默认merge_result.xlsx） |
 | string_columns | List[str] | 否 | 需要保持为字符串格式的列名列表（避免"001"变成1） |
+
+### 模板生成模块参数
+
+| 参数 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| template_file | str | 是 | 模板Excel文件路径 |
+| template_sheet | str | 是 | 模板工作表名称 |
+| formula_columns | List[str] | 否 | 包含公式的列名列表 |
+| data_sources | List[Dict] | 是 | 数据源配置列表 |
+| output_file | str | 否 | 输出文件名（默认output.xlsx） |
+| string_columns | List[str] | 否 | 需要保持为字符串格式的列名列表 |
+| use_external_refs | bool | 否 | 是否使用外部引用（默认True），False则直接写入数据值 |
+
+**数据源配置（data_sources中的每个元素）：**
+
+| 字段 | 类型 | 必需 | 描述 |
+|------|------|------|------|
+| file_path | str | 是 | 数据源Excel文件路径 |
+| sheet_name | str | 是 | 数据源工作表名称 |
+| column_mappings | List[Dict] | 否 | 列映射配置（可以为空，仅用于公式引用） |
+| alias | str | 否 | 别名（如"sheet0"，用于模板公式中引用） |
+
+**列映射配置（column_mappings中的每个元素）：**
+
+| 字段 | 类型 | 描述 |
+|------|------|------|
+| source | str | 源列名（数据源中的列名） |
+| target | str | 目标列名（模板中的列名） |
 
 ## 合并逻辑说明
 
@@ -319,25 +510,24 @@ excelEAC/
 ├── modules/                  # 功能模块
 │   ├── __init__.py          # 模块包初始化
 │   ├── validation.py         # 数据验证模块
-│   └── merge.py            # 表合并模块
+│   ├── merge.py             # 表合并模块
+│   └── template_generator.py # 模板生成模块
 ├── tests/                   # 测试代码
 │   ├── README.md            # 测试说明
 │   ├── validation/          # 验证模块测试
 │   │   ├── README.md        # 验证测试说明
-│   │   └── test_*.py      # 验证测试文件
-│   └── merge/              # 合并模块测试
-│       ├── README.md        # 合并测试说明
-│       ├── sample_data/     # 测试样例数据
-│       │   ├── table_a_basic.xlsx
-│       │   ├── table_b_basic.xlsx
-│       │   ├── table_a_extra.xlsx
-│       │   ├── table_b_extra.xlsx
-│       │   ├── table_a_multi.xlsx
-│       │   └── table_b_multi.xlsx
-│       └── test_*.py      # 合并测试文件
+│   │   └── test_*.py        # 验证测试文件
+│   ├── merge/               # 合并模块测试
+│   │   ├── README.md        # 合并测试说明
+│   │   ├── sample_data/     # 测试样例数据
+│   │   └── test_*.py        # 合并测试文件
+│   └── template/            # 模板生成模块测试
+│       ├── test_template_generator.py  # 基础功能测试
+│       ├── test_complex_formula.py     # 复杂公式测试
+│       └── test_real_sheet_name.py     # 实际sheet名测试
 ├── run_tests.py             # 测试运行脚本
-├── README.md               # 项目说明文档
-└── .gitignore             # Git忽略配置
+├── README.md                # 项目说明文档
+└── .gitignore               # Git忽略配置
 ```
 
 ## 运行测试
@@ -348,6 +538,11 @@ python tests/test_standard.py
 
 # 运行合并模块测试
 python tests/test_merge.py
+
+# 运行模板生成模块测试
+python tests/template/test_template_generator.py
+python tests/template/test_complex_formula.py
+python tests/template/test_real_sheet_name.py
 
 # 运行所有测试
 python run_tests.py
@@ -361,6 +556,11 @@ python run_tests.py
 4. 合并模块：确保额外列在对应的表中存在
 5. **重要**：对于需要保持格式（如"001"）的列，请使用 `string_columns` 参数指定
 6. 验证模块输出的是组级别的汇总数据，行数等于组数量，不是原始数据行数
+7. **模板生成模块**：
+   - 公式中的sheet名可以使用别名（sheet0, sheet1）或实际sheet名
+   - 支持复杂嵌套公式和整列引用（A:A）
+   - 使用 `--direct-values` 参数可直接写入数据值（适用于Numbers等不支持外部引用的软件）
+   - 数据源可以只用于公式引用（column_mappings为空）
 
 ## 许可证
 

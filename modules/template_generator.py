@@ -242,15 +242,17 @@ def replace_sheet_references(
         str: 替换后的公式
         格式: SheetName!A1 -> '[filename.xlsx]SheetName'!A1
              'Sheet-Name'!A:A -> '[filename.xlsx]Sheet-Name'!A:A
+             '[old.xlsx]SheetName'!A1 -> '[new.xlsx]SheetName'!A1
     """
     # 匹配sheet引用，支持多种格式：
     # - sheet0!A1 或 Sheet1!A1 (不带引号的sheet名)
     # - 'ESDP-Bpart'!A:A (带单引号的sheet名)
+    # - '[sales.xlsx]Sheet1'!A1 (带文件路径的sheet名)
     # - 单元格引用: A1
     # - 整列引用: A:A
     # - 范围引用: A1:A10, A1:B10
 
-    # 匹配带单引号的sheet名: 'SheetName'!CellRef
+    # 匹配带单引号的sheet名（可能包含文件路径）: 'SheetName'!CellRef 或 '[filename]SheetName'!CellRef
     quoted_pattern = r"'([^']+)'!([A-Z]+\d*(?::[A-Z]*\d*)?)"
 
     # 匹配不带单引号的sheet名: SheetName!CellRef (sheet名由字母、数字、下划线组成)
@@ -282,27 +284,41 @@ def replace_sheet_references(
                 return f"{col}{row}"
             return cell_ref
 
+    def extract_sheet_name(full_reference: str) -> str:
+        """
+        从完整引用中提取实际的sheet名
+        例如: '[sales.xlsx]Sheet1' -> 'Sheet1'
+              'ESDP-Bpart' -> 'ESDP-Bpart'
+        """
+        # 检查是否包含文件路径格式 [filename]sheetname
+        bracket_match = re.match(r'\[.+\](.+)', full_reference)
+        if bracket_match:
+            return bracket_match.group(1)
+        return full_reference
+
     def find_matching_info(sheet_name: str):
         """查找匹配的sheet信息（支持别名和实际sheet名）"""
-        sheet_name_lower = sheet_name.lower()
+        # 首先提取实际的sheet名（去掉可能存在的文件路径）
+        actual_sheet_name = extract_sheet_name(sheet_name)
+        actual_sheet_name_lower = actual_sheet_name.lower()
 
         # 1. 首先尝试精确匹配（不区分大小写）
         for key, info in alias_to_info.items():
-            if key.lower() == sheet_name_lower:
+            if key.lower() == actual_sheet_name_lower:
                 return info
 
         # 2. 尝试匹配实际的sheet名
         for key, info in alias_to_info.items():
-            if info.get('sheet_name', '').lower() == sheet_name_lower:
+            if info.get('sheet_name', '').lower() == actual_sheet_name_lower:
                 return info
 
         return None
 
     def replace_quoted_match(match):
-        sheet_name = match.group(1)
+        full_reference = match.group(1)  # 可能是 'SheetName' 或 '[filename]SheetName'
         cell_ref = match.group(2).upper()
 
-        info = find_matching_info(sheet_name)
+        info = find_matching_info(full_reference)
         if info:
             file_path = info['file_path']
             actual_sheet_name = info['sheet_name']
