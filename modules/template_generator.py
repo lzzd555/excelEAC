@@ -922,7 +922,8 @@ def generate_excel_from_template(
     data_sources: List[Dict],
     output_file: str,
     string_columns: Optional[List[str]] = None,
-    use_external_refs: bool = True
+    use_external_refs: bool = True,
+    primary_column: Optional[str] = None
 ) -> pd.DataFrame:
     """
     基于模板生成Excel文件
@@ -943,6 +944,8 @@ def generate_excel_from_template(
         use_external_refs: 是否使用外部文件引用公式。
             True: 公式使用外部引用（如 ='[sales.xlsx]Sheet1'!A1），需Excel打开
             False: 直接写入数据值，只有本地计算公式（如 =A1+B1）保留公式
+        primary_column: 主键列名。当此列的值为空时，该行不会被添加到输出文件中。
+            为 None 时不进行过滤。
 
     Returns:
         pd.DataFrame: 生成的数据
@@ -1075,9 +1078,24 @@ def generate_excel_from_template(
     print("4. 合并数据...")
     merged_df = merge_data_by_row(loaded_data_sources, template_columns)
 
+    # 5. 数据过滤：根据主键列过滤空值行
+    if primary_column:
+        if primary_column in merged_df.columns:
+            original_count = len(merged_df)
+            # 过滤掉主键列为空（NaN、None、空字符串）的行
+            merged_df = merged_df[
+                merged_df[primary_column].notna() &
+                (merged_df[primary_column].astype(str).str.strip() != '')
+            ]
+            filtered_count = len(merged_df)
+            if original_count > filtered_count:
+                print(f"   过滤掉 {original_count - filtered_count} 行（{primary_column} 列为空）")
+        else:
+            print(f"   警告: 主键列 '{primary_column}' 不存在于数据中，跳过过滤")
+
     print()
 
-    # 5. 输出生成：写入数据，应用公式，保存文件
+    # 6. 输出生成：写入数据，应用公式，保存文件
     print("5. 生成输出文件...")
 
     if use_external_refs:
