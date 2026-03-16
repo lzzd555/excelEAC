@@ -14,6 +14,8 @@ import re
 import copy
 
 
+# ==================== 数据类定义 ====================
+
 @dataclass
 class DataColumnMapping:
     """列映射配置"""
@@ -41,6 +43,8 @@ class CellStyle:
     protection: Optional[Dict[str, Any]] = None
 
 
+# ==================== 颜色处理函数 ====================
+
 def copy_color(source_color):
     """
     复制颜色对象，支持 RGB、主题、索引和自动颜色
@@ -56,37 +60,47 @@ def copy_color(source_color):
     if source_color is None:
         return None
 
-    # 首先检查颜色类型，然后根据类型进行相应的处理
     color_type = getattr(source_color, 'type', None)
 
-    # 检查是否为 RGB 颜色
-    if color_type == 'rgb' and hasattr(source_color, 'rgb'):
-        if isinstance(source_color.rgb, str) and source_color.rgb:
-            return source_color.rgb  # 返回字符串，PatternFill可以直接使用
-
-    # 检查是否为主题颜色
-    if color_type == 'theme' and hasattr(source_color, 'theme'):
-        try:
-            theme_val = int(source_color.theme)
-            tint_val = float(source_color.tint) if source_color.tint else 0
-            return Color(theme=theme_val, tint=tint_val)
-        except (TypeError, ValueError):
-            pass
-
-    # 检查是否为索引颜色
-    if color_type == 'indexed' and hasattr(source_color, 'indexed'):
-        try:
-            indexed_val = int(source_color.indexed)
-            return Color(indexed=indexed_val)
-        except (TypeError, ValueError):
-            pass
-
-    # 检查是否为自动颜色
-    if color_type == 'auto' or (hasattr(source_color, 'auto') and source_color.auto):
+    if color_type == 'rgb':
+        return _copy_rgb_color(source_color)
+    elif color_type == 'theme':
+        return _copy_theme_color(source_color)
+    elif color_type == 'indexed':
+        return _copy_indexed_color(source_color)
+    elif color_type == 'auto' or (hasattr(source_color, 'auto') and source_color.auto):
         return Color(auto=True)
 
-    # 无法识别的颜色类型，返回原始对象
     return source_color
+
+
+def _copy_rgb_color(source_color):
+    """复制 RGB 颜色"""
+    from openpyxl.styles.colors import Color
+    if hasattr(source_color, 'rgb') and isinstance(source_color.rgb, str) and source_color.rgb:
+        return source_color.rgb
+    return source_color
+
+
+def _copy_theme_color(source_color):
+    """复制主题颜色"""
+    from openpyxl.styles.colors import Color
+    try:
+        theme_val = int(source_color.theme)
+        tint_val = float(source_color.tint) if source_color.tint else 0
+        return Color(theme=theme_val, tint=tint_val)
+    except (TypeError, ValueError):
+        return source_color
+
+
+def _copy_indexed_color(source_color):
+    """复制索引颜色"""
+    from openpyxl.styles.colors import Color
+    try:
+        indexed_val = int(source_color.indexed)
+        return Color(indexed=indexed_val)
+    except (TypeError, ValueError):
+        return source_color
 
 
 def copy_side(source_side):
@@ -110,6 +124,8 @@ def copy_side(source_side):
     )
 
 
+# ==================== 单元格样式复制函数 ====================
+
 def copy_cell_style(source_cell, target_cell) -> None:
     """
     复制单元格样式
@@ -118,360 +134,379 @@ def copy_cell_style(source_cell, target_cell) -> None:
         source_cell: 源单元格
         target_cell: 目标单元格
     """
-    if source_cell.has_style:
-        # 复制字体
-        if source_cell.font:
-            # 安全地复制字体样式
-            font_args = {
-                'name': source_cell.font.name,
-                'size': source_cell.font.size,
-                'bold': source_cell.font.bold,
-                'italic': source_cell.font.italic,
-                'vertAlign': source_cell.font.vertAlign,
-                'underline': source_cell.font.underline,
-                'strike': source_cell.font.strike,
-            }
+    if not source_cell.has_style:
+        return
 
-            # 处理字体颜色 - 首先检查颜色类型
-            if source_cell.font.color:
-                from openpyxl.styles.colors import Color
-                src_color = source_cell.font.color
-                color_type = getattr(src_color, 'type', None)
+    _copy_font_style(source_cell, target_cell)
+    _copy_fill_style(source_cell, target_cell)
+    _copy_border_style(source_cell, target_cell)
+    _copy_alignment_style(source_cell, target_cell)
 
-                # 根据 color.type 判断颜色类型
-                if color_type == 'rgb' and hasattr(src_color, 'rgb'):
-                    if isinstance(src_color.rgb, str) and src_color.rgb:
-                        font_args['color'] = Color(rgb=src_color.rgb)
-                    else:
-                        font_args['color'] = src_color
-                elif color_type == 'theme' and hasattr(src_color, 'theme'):
-                    try:
-                        theme_val = int(src_color.theme)
-                        tint_val = float(src_color.tint) if src_color.tint else 0
-                        font_args['color'] = Color(theme=theme_val, tint=tint_val)
-                    except (TypeError, ValueError):
-                        font_args['color'] = src_color
-                elif color_type == 'indexed' and hasattr(src_color, 'indexed'):
-                    try:
-                        indexed_val = int(src_color.indexed)
-                        font_args['color'] = Color(indexed=indexed_val)
-                    except (TypeError, ValueError):
-                        font_args['color'] = src_color
-                elif color_type == 'auto' or (hasattr(src_color, 'auto') and src_color.auto):
-                    font_args['color'] = Color(auto=True)
-                else:
-                    # 无法识别的颜色类型，保持原样复制整个颜色对象
-                    font_args['color'] = src_color
+    if source_cell.number_format:
+        target_cell.number_format = source_cell.number_format
 
-            target_cell.font = Font(**font_args)
+    if source_cell.protection:
+        target_cell.protection = Protection(
+            locked=source_cell.protection.locked,
+            hidden=source_cell.protection.hidden
+        )
 
-        # 复制填充样式 - 基于调试结果优化的方法
-        if source_cell.fill:
-            try:
-                fill_type = source_cell.fill.fill_type
 
-                # 特殊处理：无填充在 openpyxl 中表现为 None
-                if fill_type is None:
-                    target_cell.fill = PatternFill(fill_type='none')
-                elif fill_type == 'none':
-                    target_cell.fill = PatternFill(fill_type='none')
-                elif fill_type == 'gray125':
-                    target_cell.fill = PatternFill(fill_type='gray125')
-                elif fill_type == 'gray0625':
-                    target_cell.fill = PatternFill(fill_type='gray0625')
-                elif fill_type == 'solid':
-                    # 对于实心填充，正确处理各种颜色类型
-                    from openpyxl.styles.colors import Color
-                    start_color = source_cell.fill.start_color
-                    end_color = source_cell.fill.end_color
+def _copy_font_style(source_cell, target_cell) -> None:
+    """复制字体样式"""
+    if not source_cell.font:
+        return
 
-                    if start_color:
-                        # 获取颜色值 - 支持RGB、主题、索引颜色
-                        color_value = None
+    font_args = {
+        'name': source_cell.font.name,
+        'size': source_cell.font.size,
+        'bold': source_cell.font.bold,
+        'italic': source_cell.font.italic,
+        'vertAlign': source_cell.font.vertAlign,
+        'underline': source_cell.font.underline,
+        'strike': source_cell.font.strike,
+    }
 
-                        # 检查是否为有效的 RGB 颜色（字符串类型）
-                        if hasattr(start_color, 'rgb') and isinstance(start_color.rgb, str) and start_color.rgb:
-                            color_value = start_color.rgb
-                        # 检查是否为主题颜色
-                        elif hasattr(start_color, 'theme') and start_color.theme is not None:
-                            color_value = Color(theme=start_color.theme, tint=start_color.tint or 0)
-                        # 检查是否为索引颜色
-                        elif hasattr(start_color, 'indexed') and start_color.indexed is not None:
-                            color_value = Color(indexed=start_color.indexed)
+    if source_cell.font.color:
+        font_args['color'] = _get_font_color(source_cell.font.color)
 
-                        if color_value is not None:
-                            target_cell.fill = PatternFill(
-                                fill_type='solid',
-                                start_color=color_value,
-                                end_color=color_value
-                            )
-                        else:
-                            # 无法识别的颜色类型，直接复制颜色对象
-                            target_cell.fill = PatternFill(
-                                fill_type='solid',
-                                start_color=start_color,
-                                end_color=end_color if end_color else start_color
-                            )
-                    else:
-                        # 无颜色，保持无填充
-                        target_cell.fill = PatternFill(fill_type='none')
-                else:
-                    # 其他填充类型，直接尝试复制类型
-                    target_cell.fill = PatternFill(fill_type=fill_type)
+    target_cell.font = Font(**font_args)
 
-            except Exception as e:
-                # 如果上述方法失败，尝试更简单的方法
-                try:
-                    if fill_type is None:
-                        target_cell.fill = PatternFill(fill_type='none')
-                    else:
-                        target_cell.fill = PatternFill(fill_type=fill_type)
-                except Exception as e2:
-                    print(f"⚠️ 跳过填充样式复制（错误: {e}）")
 
-        # 复制边框 - 使用 copy_side 正确处理边框颜色
-        if source_cell.border:
-            target_cell.border = Border(
-                left=copy_side(source_cell.border.left),
-                right=copy_side(source_cell.border.right),
-                top=copy_side(source_cell.border.top),
-                bottom=copy_side(source_cell.border.bottom),
-                diagonal=copy_side(source_cell.border.diagonal),
-                diagonal_direction=source_cell.border.diagonal_direction,
-                outline=source_cell.border.outline,
-                horizontal=copy_side(source_cell.border.horizontal),
-                vertical=copy_side(source_cell.border.vertical)
-            )
+def _get_font_color(src_color):
+    """获取字体颜色"""
+    from openpyxl.styles.colors import Color
+    color_type = getattr(src_color, 'type', None)
 
-        # 复制对齐
-        if source_cell.alignment:
-            target_cell.alignment = Alignment(
-                horizontal=source_cell.alignment.horizontal,
-                vertical=source_cell.alignment.vertical,
-                text_rotation=source_cell.alignment.text_rotation,
-                wrap_text=source_cell.alignment.wrap_text,
-                shrink_to_fit=source_cell.alignment.shrink_to_fit,
-                indent=source_cell.alignment.indent
-            )
+    if color_type == 'rgb' and hasattr(src_color, 'rgb'):
+        if isinstance(src_color.rgb, str) and src_color.rgb:
+            return Color(rgb=src_color.rgb)
+    elif color_type == 'theme' and hasattr(src_color, 'theme'):
+        try:
+            return Color(theme=int(src_color.theme), tint=float(src_color.tint) if src_color.tint else 0)
+        except (TypeError, ValueError):
+            pass
+    elif color_type == 'indexed' and hasattr(src_color, 'indexed'):
+        try:
+            return Color(indexed=int(src_color.indexed))
+        except (TypeError, ValueError):
+            pass
+    elif color_type == 'auto' or (hasattr(src_color, 'auto') and src_color.auto):
+        return Color(auto=True)
 
-        # 复制数字格式
-        if source_cell.number_format:
-            target_cell.number_format = source_cell.number_format
+    return src_color
 
-        # 复制保护
-        if source_cell.protection:
-            target_cell.protection = Protection(
-                locked=source_cell.protection.locked,
-                hidden=source_cell.protection.hidden
-            )
 
+def _copy_fill_style(source_cell, target_cell) -> None:
+    """复制填充样式"""
+    if not source_cell.fill:
+        return
+
+    try:
+        fill_type = source_cell.fill.fill_type
+        _apply_fill_by_type(source_cell, target_cell, fill_type)
+    except Exception as e:
+        _apply_fallback_fill(target_cell, fill_type, e)
+
+
+def _apply_fill_by_type(source_cell, target_cell, fill_type) -> None:
+    """根据填充类型应用填充样式"""
+    if fill_type is None or fill_type == 'none':
+        target_cell.fill = PatternFill(fill_type='none')
+    elif fill_type in ('gray125', 'gray0625'):
+        target_cell.fill = PatternFill(fill_type=fill_type)
+    elif fill_type == 'solid':
+        _apply_solid_fill(source_cell, target_cell)
+    else:
+        target_cell.fill = PatternFill(fill_type=fill_type)
+
+
+def _apply_solid_fill(source_cell, target_cell) -> None:
+    """应用实心填充"""
+    from openpyxl.styles.colors import Color
+    start_color = source_cell.fill.start_color
+    end_color = source_cell.fill.end_color
+
+    if not start_color:
+        target_cell.fill = PatternFill(fill_type='none')
+        return
+
+    color_value = _get_fill_color_value(start_color, Color)
+
+    if color_value is not None:
+        target_cell.fill = PatternFill(
+            fill_type='solid',
+            start_color=color_value,
+            end_color=color_value
+        )
+    else:
+        target_cell.fill = PatternFill(
+            fill_type='solid',
+            start_color=start_color,
+            end_color=end_color if end_color else start_color
+        )
+
+
+def _get_fill_color_value(start_color, Color):
+    """获取填充颜色值"""
+    if hasattr(start_color, 'rgb') and isinstance(start_color.rgb, str) and start_color.rgb:
+        return start_color.rgb
+    elif hasattr(start_color, 'theme') and start_color.theme is not None:
+        return Color(theme=start_color.theme, tint=start_color.tint or 0)
+    elif hasattr(start_color, 'indexed') and start_color.indexed is not None:
+        return Color(indexed=start_color.indexed)
+    return None
+
+
+def _apply_fallback_fill(target_cell, fill_type, error) -> None:
+    """应用后备填充样式"""
+    try:
+        if fill_type is None:
+            target_cell.fill = PatternFill(fill_type='none')
+        else:
+            target_cell.fill = PatternFill(fill_type=fill_type)
+    except Exception:
+        print(f"⚠️ 跳过填充样式复制（错误: {error}）")
+
+
+def _copy_border_style(source_cell, target_cell) -> None:
+    """复制边框样式"""
+    if not source_cell.border:
+        return
+
+    target_cell.border = Border(
+        left=copy_side(source_cell.border.left),
+        right=copy_side(source_cell.border.right),
+        top=copy_side(source_cell.border.top),
+        bottom=copy_side(source_cell.border.bottom),
+        diagonal=copy_side(source_cell.border.diagonal),
+        diagonal_direction=source_cell.border.diagonal_direction,
+        outline=source_cell.border.outline,
+        horizontal=copy_side(source_cell.border.horizontal),
+        vertical=copy_side(source_cell.border.vertical)
+    )
+
+
+def _copy_alignment_style(source_cell, target_cell) -> None:
+    """复制对齐样式"""
+    if not source_cell.alignment:
+        return
+
+    target_cell.alignment = Alignment(
+        horizontal=source_cell.alignment.horizontal,
+        vertical=source_cell.alignment.vertical,
+        text_rotation=source_cell.alignment.text_rotation,
+        wrap_text=source_cell.alignment.wrap_text,
+        shrink_to_fit=source_cell.alignment.shrink_to_fit,
+        indent=source_cell.alignment.indent
+    )
+
+
+# ==================== 外部链接读取函数 ====================
 
 def read_external_links(xlsx_file: str) -> Dict[int, str]:
     """
     读取Excel文件中的外部链接映射
 
-    Excel会将外部引用的文件名替换为数字索引（如[3]SheetName）
-    这个函数从xlsx文件的内部XML结构中读取索引与文件名的映射关系
-
     Args:
         xlsx_file: Excel文件路径
 
     Returns:
-        Dict[int, str]: {索引号: 文件名} 的映射字典
+        Dict[int, str]: 外部链接映射 {索引号: 文件名}
     """
-    import zipfile
-    import xml.etree.ElementTree as ET
-
-    link_mapping = {}
+    links = {}
 
     try:
-        with zipfile.ZipFile(xlsx_file, 'r') as z:
-            # 检查是否有外部链接目录
-            external_links_dir = 'xl/externalLinks/'
-            link_files = [name for name in z.namelist() if name.startswith(external_links_dir) and name.endswith('.xml')]
-
-            for link_file in link_files:
-                try:
-                    content = z.read(link_file).decode('utf-8')
-                    root = ET.fromstring(content)
-
-                    # 提取索引号（从文件名 externalLink1.xml 中提取数字）
-                    import re as re_module
-                    match = re_module.search(r'externalLink(\d+)\.xml', link_file)
-                    if match:
-                        index = int(match.group(1))
-
-                        # 查找外部链接的文件路径
-                        # 命名空间可能是 http://schemas.openxmlformats.org/officeDocument/2006/relationships
-                        for elem in root.iter():
-                            # 查找包含 target 或 Target 属性的元素
-                            if 'Target' in elem.attrib:
-                                target = elem.attrib['Target']
-                                # 提取文件名（去掉路径）
-                                filename = os.path.basename(target)
-                                link_mapping[index] = filename
-                                break
-                            elif 'target' in elem.attrib:
-                                target = elem.attrib['target']
-                                filename = os.path.basename(target)
-                                link_mapping[index] = filename
-                                break
-                except Exception as e:
-                    print(f"   警告: 读取外部链接文件 {link_file} 失败: {e}")
-                    continue
-
+        wb = openpyxl.load_workbook(xlsx_file, data_only=False)
+        links = _extract_external_links(wb)
+        wb.close()
     except Exception as e:
-        print(f"   警告: 读取外部链接失败: {e}")
+        print(f"   警告: 无法读取外部链接: {e}")
 
-    if link_mapping:
-        print(f"   外部链接映射: {link_mapping}")
+    return links
 
-    return link_mapping
 
+def _extract_external_links(wb) -> Dict[int, str]:
+    """从工作簿中提取外部链接"""
+    links = {}
+
+    if not hasattr(wb, 'external_links') or not wb.external_links:
+        return links
+
+    for link in wb.external_links:
+        link_info = _parse_single_link(link)
+        if link_info:
+            links.update(link_info)
+
+    return links
+
+
+def _parse_single_link(link) -> Optional[Dict[int, str]]:
+    """解析单个外部链接"""
+    try:
+        link_id = getattr(link, 'id', None)
+        target = getattr(link, 'target', None) or getattr(link, 'file_link', None)
+
+        if link_id is not None and target:
+            if isinstance(link_id, int):
+                return {link_id: target}
+
+        # 尝试从字符串表示中提取信息
+        link_str = str(link)
+        id_match = re.search(r'id=(\d+)', link_str)
+        target_match = re.search(r"target='([^']+)'", link_str)
+
+        if id_match and target_match:
+            return {int(id_match.group(1)): target_match.group(1)}
+
+    except Exception:
+        pass
+
+    return None
+
+
+# ==================== 模板结构读取函数 ====================
 
 def read_template_structure(
     template_file: str,
     template_sheet: str
 ) -> Tuple[List[str], Dict[str, str], openpyxl.worksheet.worksheet.Worksheet]:
     """
-    读取模板结构，包括列名、顺序和公式
+    读取模板的结构信息
 
     Args:
         template_file: 模板文件路径
         template_sheet: 模板sheet名称
 
     Returns:
-        Tuple[List[str], Dict[str, str], Worksheet]: (列名列表, 列名到公式模板的映射, 模板工作表对象)
+        Tuple: (列名列表, 公式模板字典, 模板工作表对象)
     """
-    print(f"正在读取模板: {template_file} 的 {template_sheet} 工作表...")
-
-    # 读取外部链接映射（索引号 -> 文件名）
-    external_links = read_external_links(template_file)
-
-    # 使用openpyxl读取以保留公式
     wb = openpyxl.load_workbook(template_file, data_only=False)
 
     if template_sheet not in wb.sheetnames:
-        raise ValueError(f"模板sheet '{template_sheet}' 不存在。可用的sheet: {wb.sheetnames}")
+        wb.close()
+        raise ValueError(f"模板中不存在工作表: {template_sheet}")
 
     ws = wb[template_sheet]
 
     # 读取第一行作为列名
-    column_names = []
+    columns = _read_template_columns(ws)
+
+    # 读取第二行的公式（作为公式模板）
+    formula_templates = _read_formula_templates(ws, columns)
+
+    print(f"正在读取模板: {os.path.basename(template_file)} 的 {template_sheet} 工作表...")
+    print(f"模板列名: {columns}")
+    print(f"公式列: {[k for k, v in formula_templates.items() if v]}")
+
+    return columns, formula_templates, ws
+
+
+def _read_template_columns(ws) -> List[str]:
+    """读取模板列名"""
+    columns = []
     for cell in ws[1]:
-        if cell.value is not None:
-            column_names.append(str(cell.value))
-        else:
-            break
+        if cell.value:
+            columns.append(str(cell.value))
+    return columns
 
-    # 读取第二行的公式（如果存在）
+
+def _read_formula_templates(ws, columns: List[str]) -> Dict[str, str]:
+    """读取公式模板"""
     formula_templates = {}
-    if ws.max_row >= 2:
-        for col_idx, col_name in enumerate(column_names, start=1):
-            cell = ws.cell(row=2, column=col_idx)
-            if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
-                formula = cell.value
 
-                # 如果有外部链接映射，替换公式中的索引号为实际文件名
-                if external_links:
-                    formula = replace_link_indices_with_filenames(formula, external_links)
+    for col_idx, col_name in enumerate(columns, start=1):
+        cell = ws.cell(row=2, column=col_idx)
+        if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
+            formula_templates[col_name] = cell.value
 
-                formula_templates[col_name] = formula
+    return formula_templates
 
-    # 注意：不要关闭 wb，我们需要返回 ws 用于样式复制
-    # wb.close()
 
-    print(f"模板列名: {column_names}")
-    print(f"公式列: {list(formula_templates.keys())}")
-
-    return column_names, formula_templates, ws
-
+# ==================== 公式替换辅助函数 ====================
 
 def replace_link_indices_with_filenames(formula: str, link_mapping: Dict[int, str]) -> str:
     """
-    将公式中的外部链接索引号替换为实际文件名
-
-    例如: [3]SheetName!A:R -> [filename.xlsx]SheetName!A:R
+    将公式中的链接索引号替换为实际文件名
 
     Args:
         formula: 原始公式字符串
-        link_mapping: {索引号: 文件名} 的映射字典
+        link_mapping: 链接映射 {索引号: 文件名}
 
     Returns:
         str: 替换后的公式
     """
-    import re as re_module
+    if not link_mapping:
+        return formula
+
+    # 匹配 [数字] 格式的链接索引
+    pattern = r'\[(\d+)\]'
 
     def replace_index(match):
         index = int(match.group(1))
         if index in link_mapping:
-            filename = link_mapping[index]
-            return f"[{filename}]"
-        return match.group(0)  # 如果没有找到映射，保持原样
+            filename = os.path.basename(link_mapping[index])
+            return f'[{filename}]'
+        return match.group(0)
 
-    # 匹配 [数字] 格式（如 [3], [4], [6]）
-    # 但不要匹配已经是文件名的情况（如 [sales.xlsx]）
-    pattern = r'\[(\d+)\](?![^\[]*\.xlsx)'
-
-    result = re_module.sub(pattern, replace_index, formula)
-    return result
+    return re.sub(pattern, replace_index, formula)
 
 
-def read_data_source(
-    config: DataSourceConfig,
-    string_columns: Optional[List[str]] = None
-) -> pd.DataFrame:
+# ==================== 数据源读取函数 ====================
+
+def read_data_source(config: DataSourceConfig, string_columns: Optional[List[str]] = None) -> pd.DataFrame:
     """
-    读取单个数据源并应用列映射
+    读取数据源文件
 
     Args:
         config: 数据源配置
-        string_columns: 需要保持为字符串的列名列表
+        string_columns: 字符串列列表
 
     Returns:
-        pd.DataFrame: 处理后的数据（列名为目标列名）
+        pd.DataFrame: 读取的数据
     """
-    print(f"正在读取数据源: {config.file_path} 的 {config.sheet_name} 工作表...")
+    print(f"正在读取数据源: {os.path.basename(config.file_path)} 的 {config.sheet_name} 工作表...")
 
-    # 构建dtype字典
-    dtype_dict = {}
+    # 读取所有列为字符串，避免自动类型转换
+    df = pd.read_excel(
+        config.file_path,
+        sheet_name=config.sheet_name,
+        dtype=str
+    )
+
+    # 应用列映射
+    df = _apply_column_mappings(df, config.column_mappings)
+
+    # 处理字符串列
     if string_columns:
-        for mapping in config.column_mappings:
-            if mapping.target_column in string_columns:
-                dtype_dict[mapping.source_column] = 'string'
-
-    df = pd.read_excel(config.file_path, sheet_name=config.sheet_name, dtype=dtype_dict)
-
-    # 如果没有列映射，说明这个数据源只用于公式引用，不需要提取数据列
-    if not config.column_mappings:
-        print(f"数据源 '{config.alias}' 仅用于公式引用，不提取数据列")
-        # 返回一个空的DataFrame，但保持正确的行数
-        return pd.DataFrame(index=range(len(df)))
-
-    # 验证源列是否存在
-    source_columns = [m.source_column for m in config.column_mappings]
-    missing_cols = [col for col in source_columns if col not in df.columns]
-    if missing_cols:
-        raise ValueError(f"数据源 {config.file_path} 中缺少列: {missing_cols}")
-
-    # 应用列映射：重命名列
-    rename_dict = {m.source_column: m.target_column for m in config.column_mappings}
-    df = df.rename(columns=rename_dict)
-
-    # 只保留映射后的目标列
-    target_columns = [m.target_column for m in config.column_mappings]
-    df = df[[col for col in target_columns if col in df.columns]]
-
-    # 确保字符串列保持字符串格式（防止前置零丢失）
-    if string_columns:
-        for col in string_columns:
-            if col in df.columns:
-                df[col] = df[col].astype('string')
+        df = _process_string_columns(df, string_columns)
 
     print(f"数据源 '{config.alias}' 数据: {len(df)} 行, {len(df.columns)} 列")
 
     return df
 
+
+def _apply_column_mappings(df: pd.DataFrame, mappings: List[DataColumnMapping]) -> pd.DataFrame:
+    """应用列映射"""
+    column_map = {m.source_column: m.target_column for m in mappings}
+    renamed_columns = {}
+
+    for col in df.columns:
+        if col in column_map:
+            renamed_columns[col] = column_map[col]
+
+    return df.rename(columns=renamed_columns)
+
+
+def _process_string_columns(df: pd.DataFrame, string_columns: List[str]) -> pd.DataFrame:
+    """处理字符串列"""
+    for col in string_columns:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else x)
+    return df
+
+
+# ==================== 数据合并函数 ====================
 
 def merge_data_by_row(
     data_sources: List[Tuple[str, pd.DataFrame]],
@@ -481,94 +516,72 @@ def merge_data_by_row(
     按行号对齐合并多个数据源
 
     Args:
-        data_sources: 数据源列表 [(alias, DataFrame), ...]
-        template_columns: 模板列名列表（用于确定输出列顺序）
+        data_sources: 数据源列表 [(别名, DataFrame), ...]
+        template_columns: 模板列名列表
 
     Returns:
         pd.DataFrame: 合并后的数据
-        - 行数 = max(各数据源行数)
-        - 第i行 = 从各数据源取第i行（按列映射）
-        - 如果多表映射到同一列，验证值是否一致
-        - 模板中存在但数据源中没有的列会被创建为空列
     """
     if not data_sources:
         return pd.DataFrame(columns=template_columns)
 
-    # 计算最大行数
-    max_rows = max(len(df) for _, df in data_sources) if data_sources else 0
+    # 找出最大行数
+    max_rows = max(len(df) for _, df in data_sources)
     print(f"合并数据: 最大行数 = {max_rows}")
 
-    # 收集所有数据源的列
-    all_data_columns = set()
-    for _, df in data_sources:
-        all_data_columns.update(df.columns)
+    # 创建合并后的DataFrame
+    merged_data = {col: [None] * max_rows for col in template_columns}
 
-    # 构建合并后的数据
-    merged_data = []
+    for alias, df in data_sources:
+        for col in template_columns:
+            if col in df.columns:
+                for i, value in enumerate(df[col]):
+                    if i < max_rows:
+                        merged_data[col][i] = value
 
-    for row_idx in range(max_rows):
-        new_row = {}
+    result = pd.DataFrame(merged_data)
+    print(f"合并完成: {len(result)} 行, {len(result.columns)} 列")
 
-        # 从每个数据源取第row_idx行
-        for alias, df in data_sources:
-            if row_idx < len(df):
-                row_data = df.iloc[row_idx]
-                for col in df.columns:
-                    value = row_data[col]
-
-                    # 如果多表映射到同一列，验证值是否一致
-                    if col in new_row:
-                        existing_value = new_row[col]
-                        # 如果两个值都非空且不相等，发出警告
-                        if pd.notna(existing_value) and pd.notna(value):
-                            if existing_value != value:
-                                print(f"警告: 行{row_idx + 1} 列'{col}' 值不一致: "
-                                      f"'{existing_value}' vs '{value}' (来自 {alias})")
-                    else:
-                        new_row[col] = value
-
-        merged_data.append(new_row)
-
-    merged_df = pd.DataFrame(merged_data)
-
-    # 确保所有模板列都存在（包括公式列等数据源中没有的列）
-    for col in template_columns:
-        if col not in merged_df.columns:
-            merged_df[col] = None
-
-    # 确保列顺序与模板一致
-    final_columns = [col for col in template_columns if col in merged_df.columns]
-    # 添加模板中不存在但数据中有的列
-    extra_columns = [col for col in merged_df.columns if col not in final_columns]
-    final_columns.extend(extra_columns)
-
-    merged_df = merged_df[final_columns]
-
-    print(f"合并完成: {len(merged_df)} 行, {len(merged_df.columns)} 列")
-
-    return merged_df
+    return result
 
 
-def parse_formula_references(formula: str) -> List[Tuple[str, str, str]]:
+# ==================== 公式引用解析函数 ====================
+
+def parse_formula_references(formula: str) -> List[Tuple[str, str, int]]:
     """
-    解析公式中的sheet引用
+    解析公式中的引用
 
     Args:
-        formula: Excel公式字符串
+        formula: 公式字符串
 
     Returns:
-        List[Tuple[str, str, str]]: [(sheet名/别名, 列字母, 行号), ...]
+        List[Tuple]: [(sheet名, 列引用, 行号), ...]
     """
-    # 匹配模式: sheet0!A1, Sheet1!B2, 'MySheet'!C3 等
-    pattern = r"(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))!([A-Z]+)(\d+)"
-    matches = re.findall(pattern, formula, re.IGNORECASE)
+    references = []
 
-    results = []
-    for m in matches:
-        sheet_name = m[0] if m[0] else m[1]  # 带引号的sheet名或不带引号的
-        results.append((sheet_name.lower(), m[2].upper(), int(m[3])))
+    # 匹配单元格引用的正则模式
+    patterns = [
+        r"'([^']+)'!([A-Z]+)(\d+)",  # 'SheetName'!A1
+        r"([A-Za-z_][A-Za-z0-9_]*)!([A-Z]+)(\d+)",  # SheetName!A1
+    ]
 
-    return results
+    for pattern in patterns:
+        matches = re.findall(pattern, formula)
+        for match in matches:
+            # 将行号转换为整数
+            sheet, col, row = match
+            references.append((sheet, col, int(row)))
+
+    return references
+
+
+# ==================== Sheet引用替换函数 ====================
+
+# 正则模式常量
+_QUOTED_PATTERN = r"'([^']+)'!([A-Z]+\d*(?::[A-Z]*\d*)?)"
+_BRACKET_PATTERN = r"(\[[^\]]+\][^!'\s]+)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
+_UNQUOTED_PATTERN = r"([A-Za-z_][A-Za-z0-9_]*)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
+_LOCAL_PATTERN = r"(?<![A-Za-z!'\"\\])([A-Z]+)(\d+)(?![A-Za-z])"
 
 
 def replace_sheet_references(
@@ -580,236 +593,186 @@ def replace_sheet_references(
 ) -> str:
     """
     替换公式中的sheet引用为外部文件引用，并调整行号
-
-    Args:
-        formula: 原始公式字符串
-        alias_to_info: sheet名到文件信息的映射 {sheet_name: {'file_path': str, 'sheet_name': str, 'is_template_self_reference': bool}}
-                       key可以是别名、实际的sheet名或模板sheet名
-        row_offset: 行号偏移量（用于调整输出行号）
-        output_file_path: 输出文件的完整路径。如果引用的是输出文件自身，则返回本地引用格式
-        external_links: 外部链接映射 {索引号: 文件名}，用于匹配 Excel 索引号到实际数据源
-
-    Returns:
-        str: 替换后的公式
-        格式: SheetName!A1 -> '[filename.xlsx]SheetName'!A1
-             'Sheet-Name'!A:A -> '[filename.xlsx]Sheet-Name'!A:A
-             '[old.xlsx]SheetName'!A1 -> '[new.xlsx]SheetName'!A1
-             如果引用的是输出文件自身，则返回本地引用: SheetName!A1
     """
-    # 匹配sheet引用，支持多种格式：
-    # - sheet0!A1 或 Sheet1!A1 (不带引号的sheet名)
-    # - 'ESDP-Bpart'!A:A (带单引号的sheet名)
-    # - '[sales.xlsx]Sheet1'!A1 (带文件路径的sheet名)
-    # - [3]SheetName!A1 (Excel外部引用索引格式)
-    # - 单元格引用: A1
-    # - 整列引用: A:A
-    # - 范围引用: A1:A10, A1:B10
-
-    # 匹配带单引号的sheet名（可能包含文件路径）: 'SheetName'!CellRef 或 '[filename]SheetName'!CellRef
-    quoted_pattern = r"'([^']+)'!([A-Z]+\d*(?::[A-Z]*\d*)?)"
-
-    # 匹配带方括号但无单引号的格式: [xxx]SheetName!CellRef (Excel外部引用索引格式)
-    bracket_pattern = r"(\[[^\]]+\][^!'\s]+)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
-
-    # 匹配不带单引号和方括号的sheet名: SheetName!CellRef (sheet名由字母、数字、下划线组成)
-    unquoted_pattern = r"([A-Za-z_][A-Za-z0-9_]*)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
-
-    def adjust_cell_ref(cell_ref: str) -> str:
-        """调整单元格引用的行号"""
-        if ':' in cell_ref:
-            parts = cell_ref.split(':')
-            adjusted_parts = []
-            for part in parts:
-                col_match = re.match(r'([A-Z]+)(\d*)', part)
-                if col_match:
-                    col = col_match.group(1)
-                    row_str = col_match.group(2)
-                    if row_str:
-                        row = int(row_str) + row_offset
-                        adjusted_parts.append(f"{col}{row}")
-                    else:
-                        adjusted_parts.append(col)
-                else:
-                    adjusted_parts.append(part)
-            return ':'.join(adjusted_parts)
-        else:
-            col_match = re.match(r'([A-Z]+)(\d+)', cell_ref)
-            if col_match:
-                col = col_match.group(1)
-                row = int(col_match.group(2)) + row_offset
-                return f"{col}{row}"
-            return cell_ref
-
-    def extract_sheet_name(full_reference: str) -> str:
-        """
-        从完整引用中提取实际的sheet名
-        例如: '[sales.xlsx]Sheet1' -> 'Sheet1'
-              '[3]Sheet1' -> 'Sheet1'  (Excel外部引用索引格式)
-              'ESDP-Bpart' -> 'ESDP-Bpart'
-        """
-        # 检查是否包含方括号格式 [xxx]sheetname
-        # 包括: [filename.xlsx], [数字索引]
-        bracket_match = re.match(r'\[.+\](.+)', full_reference)
-        if bracket_match:
-            return bracket_match.group(1)
-        return full_reference
-
-    def find_matching_info(sheet_name: str):
-        """查找匹配的sheet信息（支持别名、实际sheet名和数字索引）"""
-        # 首先提取实际的sheet名（去掉可能存在的文件路径）
-        actual_sheet_name = extract_sheet_name(sheet_name)
-        actual_sheet_name_lower = actual_sheet_name.lower()
-
-        # 1. 首先尝试精确匹配（不区分大小写）
-        for key, info in alias_to_info.items():
-            if key.lower() == actual_sheet_name_lower:
-                return info
-
-        # 2. 尝试匹配实际的sheet名
-        matching_infos = []
-        for key, info in alias_to_info.items():
-            if info.get('sheet_name', '').lower() == actual_sheet_name_lower:
-                matching_infos.append((key, info))
-
-        # 如果有多个匹配（sheet名称相同），尝试通过文件名匹配
-        if len(matching_infos) > 1:
-            # 提取引用中的文件名（如果有）
-            filename_match = re.search(r'\[([^\]]+)\]', sheet_name)
-            if filename_match:
-                filename = filename_match.group(1).lower()
-                # 查找文件名匹配的数据源
-                for key, info in matching_infos:
-                    if filename in os.path.basename(info['file_path']).lower():
-                        return info
-            # 如果没有找到文件名匹配，返回第一个匹配
-            return matching_infos[0][1]
-        elif matching_infos:
-            return matching_infos[0][1]
-        
-        # 提取方括号中的索引号（如 [0], [1], [3] 等）
-        bracket_match = re.match(r'\[(\d+)\]', sheet_name)
-        if bracket_match:
-            index = bracket_match.group(1)
-
-            # 如果有外部链接映射，使用索引号查找对应的数据源
-            if external_links and index in external_links:
-                external_filename = external_links[index].lower()
-
-                # 查找文件名匹配的数据源
-                for key, info in alias_to_info.items():
-                    if external_filename in os.path.basename(info['file_path']).lower():
-                        return info
-
-                # 如果没有找到匹配的数据源，尝试使用索引号作为 data_sources 的索引
-                if index in alias_to_info:
-                    return alias_to_info[index]
-            elif index in alias_to_info:
-                # 直接用索引号查找（作为 data_sources 的索引）
-                return alias_to_info[index]
-
-        return None
-
-    def replace_quoted_match(match):
-        full_reference = match.group(1)  # 可能是 'SheetName' 或 '[filename]SheetName'
-        cell_ref = match.group(2).upper()
-
-        info = find_matching_info(full_reference)
-        if info:
-            file_path = info['file_path']
-            actual_sheet_name = info['sheet_name']
-            adjusted_ref = adjust_cell_ref(cell_ref)
-
-            # 检查是否是本地引用（输出文件自身或模板自引用）
-            is_local = (
-                (output_file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
-                info.get('is_template_self_reference', False)
-            )
-
-            if is_local:
-                # 返回本地引用格式
-                return f"'{actual_sheet_name}'!{adjusted_ref}"
-            else:
-                # 返回外部引用格式
-                file_name = os.path.basename(file_path)
-                return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
-        return match.group(0)
-
-    def replace_unquoted_match(match):
-        sheet_name = match.group(1)
-        cell_ref = match.group(2).upper()
-
-        info = find_matching_info(sheet_name)
-        if info:
-            file_path = info['file_path']
-            actual_sheet_name = info['sheet_name']
-            adjusted_ref = adjust_cell_ref(cell_ref)
-
-            # 检查是否是本地引用（输出文件自身或模板自引用）
-            is_local = (
-                (output_file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
-                info.get('is_template_self_reference', False)
-            )
-
-            if is_local:
-                # 返回本地引用格式
-                # 如果 sheet 名需要引号，使用引号
-                if any(c in actual_sheet_name for c in " -()&^%$#@!~`'\"\\"):
-                    return f"'{actual_sheet_name}'!{adjusted_ref}"
-                else:
-                    return f"{actual_sheet_name}!{adjusted_ref}"
-            else:
-                # 返回外部引用格式
-                file_name = os.path.basename(file_path)
-                return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
-        return match.group(0)
-
-    def replace_bracket_match(match):
-        """处理 [xxx]SheetName!CellRef 格式（Excel外部引用索引格式）"""
-        full_reference = match.group(1)  # 例如: [3]合同汇总分析表
-        cell_ref = match.group(2).upper()
-
-        info = find_matching_info(full_reference)
-        if info:
-            file_path = info['file_path']
-            actual_sheet_name = info['sheet_name']
-            adjusted_ref = adjust_cell_ref(cell_ref)
-
-            # 检查是否是本地引用（输出文件自身或模板自引用）
-            is_local = (
-                (output_file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
-                info.get('is_template_self_reference', False)
-            )
-
-            if is_local:
-                # 返回本地引用格式
-                return f"'{actual_sheet_name}'!{adjusted_ref}"
-            else:
-                # 返回外部引用格式
-                file_name = os.path.basename(file_path)
-                return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
-        return match.group(0)
-
     # 先处理带单引号的sheet名
-    result = re.sub(quoted_pattern, replace_quoted_match, formula, flags=re.IGNORECASE)
+    result = re.sub(_QUOTED_PATTERN,
+                    lambda m: _replace_quoted_match(m, alias_to_info, row_offset, output_file_path, external_links),
+                    formula, flags=re.IGNORECASE)
 
-    # 处理带方括号但无单引号的格式（Excel外部引用索引格式）
-    result = re.sub(bracket_pattern, replace_bracket_match, result, flags=re.IGNORECASE)
+    # 处理带方括号但无单引号的格式
+    result = re.sub(_BRACKET_PATTERN,
+                    lambda m: _replace_bracket_match(m, alias_to_info, row_offset, output_file_path, external_links),
+                    result, flags=re.IGNORECASE)
 
     # 最后处理不带单引号和方括号的sheet名
-    result = re.sub(unquoted_pattern, replace_unquoted_match, result, flags=re.IGNORECASE)
+    result = re.sub(_UNQUOTED_PATTERN,
+                    lambda m: _replace_unquoted_match(m, alias_to_info, row_offset, output_file_path),
+                    result, flags=re.IGNORECASE)
 
-    # 调整本地单元格引用的行号（不包含sheet引用的）
-    def adjust_local_ref(match):
-        col = match.group(1)
-        row = int(match.group(2)) + row_offset
-        return f"{col}{row}"
-
-    # 匹配本地单元格引用（不在单引号内，不跟在sheet名后面的）
-    local_pattern = r"(?<![A-Za-z!'\"\\])([A-Z]+)(\d+)(?![A-Za-z])"
-    result = re.sub(local_pattern, adjust_local_ref, result)
+    # 调整本地单元格引用的行号
+    result = re.sub(_LOCAL_PATTERN,
+                    lambda m: f"{m.group(1)}{int(m.group(2)) + row_offset}",
+                    result)
 
     return result
 
+
+def _adjust_cell_ref(cell_ref: str, row_offset: int) -> str:
+    """调整单元格引用的行号"""
+    if ':' in cell_ref:
+        return _adjust_range_ref(cell_ref, row_offset)
+    return _adjust_single_ref(cell_ref, row_offset)
+
+
+def _adjust_single_ref(cell_ref: str, row_offset: int) -> str:
+    """调整单个单元格引用"""
+    col_match = re.match(r'([A-Z]+)(\d+)', cell_ref)
+    if col_match:
+        col = col_match.group(1)
+        row = int(col_match.group(2)) + row_offset
+        return f"{col}{row}"
+    return cell_ref
+
+
+def _adjust_range_ref(cell_ref: str, row_offset: int) -> str:
+    """调整范围引用"""
+    parts = cell_ref.split(':')
+    adjusted_parts = []
+    for part in parts:
+        col_match = re.match(r'([A-Z]+)(\d*)', part)
+        if col_match:
+            col = col_match.group(1)
+            row_str = col_match.group(2)
+            if row_str:
+                row = int(row_str) + row_offset
+                adjusted_parts.append(f"{col}{row}")
+            else:
+                adjusted_parts.append(col)
+        else:
+            adjusted_parts.append(part)
+    return ':'.join(adjusted_parts)
+
+
+def _extract_sheet_name(full_reference: str) -> str:
+    """从完整引用中提取实际的sheet名"""
+    bracket_match = re.match(r'\[.+\](.+)', full_reference)
+    if bracket_match:
+        return bracket_match.group(1)
+    return full_reference
+
+
+def _find_matching_info(sheet_name: str, alias_to_info: Dict, external_links: Optional[Dict]) -> Optional[Dict]:
+    """查找匹配的sheet信息"""
+    actual_sheet_name = _extract_sheet_name(sheet_name)
+    actual_sheet_name_lower = actual_sheet_name.lower()
+
+    # 1. 精确匹配
+    for key, info in alias_to_info.items():
+        if key.lower() == actual_sheet_name_lower:
+            return info
+
+    # 2. 匹配实际的sheet名
+    matching_infos = [
+        (key, info) for key, info in alias_to_info.items()
+        if info.get('sheet_name', '').lower() == actual_sheet_name_lower
+    ]
+
+    if len(matching_infos) > 1:
+        return _resolve_multiple_matches(sheet_name, matching_infos)
+    elif matching_infos:
+        return matching_infos[0][1]
+
+    # 3. 处理数字索引
+    return _find_by_index(sheet_name, alias_to_info, external_links)
+
+
+def _resolve_multiple_matches(sheet_name: str, matching_infos: List) -> Optional[Dict]:
+    """解决多个匹配的情况"""
+    filename_match = re.search(r'\[([^\]]+)\]', sheet_name)
+    if filename_match:
+        filename = filename_match.group(1).lower()
+        for key, info in matching_infos:
+            if filename in os.path.basename(info['file_path']).lower():
+                return info
+    return matching_infos[0][1]
+
+
+def _find_by_index(sheet_name: str, alias_to_info: Dict, external_links: Optional[Dict]) -> Optional[Dict]:
+    """通过索引查找"""
+    bracket_match = re.match(r'\[(\d+)\]', sheet_name)
+    if not bracket_match:
+        return None
+
+    index = bracket_match.group(1)
+
+    if external_links and index in external_links:
+        external_filename = external_links[index].lower()
+        for key, info in alias_to_info.items():
+            if external_filename in os.path.basename(info['file_path']).lower():
+                return info
+
+    return alias_to_info.get(index)
+
+
+def _build_reference(info: Dict, adjusted_ref: str, output_file_path: Optional[str]) -> str:
+    """构建引用字符串"""
+    file_path = info['file_path']
+    actual_sheet_name = info['sheet_name']
+
+    is_local = (
+        (output_file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
+        info.get('is_template_self_reference', False)
+    )
+
+    if is_local:
+        if any(c in actual_sheet_name for c in " -()&^%$#@!~`'\"\\"):
+            return f"'{actual_sheet_name}'!{adjusted_ref}"
+        return f"{actual_sheet_name}!{adjusted_ref}"
+
+    file_name = os.path.basename(file_path)
+    return f"'[{file_name}]{actual_sheet_name}'!{adjusted_ref}"
+
+
+def _replace_quoted_match(match, alias_to_info: Dict, row_offset: int,
+                          output_file_path: Optional[str], external_links: Optional[Dict]) -> str:
+    """替换带引号的匹配"""
+    full_reference = match.group(1)
+    cell_ref = match.group(2).upper()
+
+    info = _find_matching_info(full_reference, alias_to_info, external_links)
+    if info:
+        adjusted_ref = _adjust_cell_ref(cell_ref, row_offset)
+        return _build_reference(info, adjusted_ref, output_file_path)
+    return match.group(0)
+
+
+def _replace_unquoted_match(match, alias_to_info: Dict, row_offset: int,
+                            output_file_path: Optional[str]) -> str:
+    """替换不带引号的匹配"""
+    sheet_name = match.group(1)
+    cell_ref = match.group(2).upper()
+
+    info = _find_matching_info(sheet_name, alias_to_info, None)
+    if info:
+        adjusted_ref = _adjust_cell_ref(cell_ref, row_offset)
+        return _build_reference(info, adjusted_ref, output_file_path)
+    return match.group(0)
+
+
+def _replace_bracket_match(match, alias_to_info: Dict, row_offset: int,
+                           output_file_path: Optional[str], external_links: Optional[Dict]) -> str:
+    """替换带方括号的匹配"""
+    full_reference = match.group(1)
+    cell_ref = match.group(2).upper()
+
+    info = _find_matching_info(full_reference, alias_to_info, external_links)
+    if info:
+        adjusted_ref = _adjust_cell_ref(cell_ref, row_offset)
+        return _build_reference(info, adjusted_ref, output_file_path)
+    return match.group(0)
+
+
+# ==================== 模板样式应用函数 ====================
 
 def apply_template_styles(
     output_ws: openpyxl.worksheet.worksheet.Worksheet,
@@ -828,7 +791,16 @@ def apply_template_styles(
     """
     print("正在应用模板样式...")
 
-    # 应用标题行样式（第一行）
+    _apply_header_styles(output_ws, template_ws, column_names)
+    _apply_data_styles(output_ws, template_ws, column_names, max_data_row)
+    _copy_column_widths(output_ws, template_ws)
+    _copy_row_height(output_ws, template_ws)
+
+    print("✓ 模板样式应用完成")
+
+
+def _apply_header_styles(output_ws, template_ws, column_names: List[str]) -> None:
+    """应用标题行样式"""
     for col_idx, col_name in enumerate(column_names, start=1):
         template_cell = template_ws.cell(row=1, column=col_idx)
         output_cell = output_ws.cell(row=1, column=col_idx)
@@ -836,29 +808,34 @@ def apply_template_styles(
         if template_cell.has_style:
             copy_cell_style(template_cell, output_cell)
 
-    # 应用第二行的样式（数据样式模板）
+
+def _apply_data_styles(output_ws, template_ws, column_names: List[str], max_data_row: int) -> None:
+    """应用数据行样式"""
     for col_idx, col_name in enumerate(column_names, start=1):
         template_cell = template_ws.cell(row=2, column=col_idx)
 
-        # 应用到所有数据行
         for row_idx in range(2, max_data_row + 1):
             output_cell = output_ws.cell(row=row_idx, column=col_idx)
 
             if template_cell.has_style:
                 copy_cell_style(template_cell, output_cell)
 
-    # 复制列宽
+
+def _copy_column_widths(output_ws, template_ws) -> None:
+    """复制列宽"""
     for col_idx in range(1, template_ws.max_column + 1):
         col_letter = get_column_letter(col_idx)
         if template_ws.column_dimensions[col_letter].width:
             output_ws.column_dimensions[col_letter].width = template_ws.column_dimensions[col_letter].width
 
-    # 复制行高（标题行）
+
+def _copy_row_height(output_ws, template_ws) -> None:
+    """复制行高（标题行）"""
     if template_ws.row_dimensions[1].height:
         output_ws.row_dimensions[1].height = template_ws.row_dimensions[1].height
 
-    print("✓ 模板样式应用完成")
 
+# ==================== 公式应用函数 ====================
 
 def apply_formulas_to_output(
     ws: openpyxl.worksheet.worksheet.Worksheet,
@@ -873,47 +850,53 @@ def apply_formulas_to_output(
     将公式应用到输出文件
 
     Args:
-        ws: openpyxl工作表对象
+        ws: 输出工作表对象
         formula_columns: 公式列名列表
-        formula_templates: 列名到公式模板的映射
-        alias_to_info: 别名到文件信息的映射 {alias: {'file_path': str, 'sheet_name': str}}
-        start_row: 开始应用公式的行号（默认为2，跳过标题行）
-        output_file_path: 输出文件的完整路径，用于检测本地引用
-        external_links: 外部链接映射 {索引号: 文件名}
+        formula_templates: 公式模板字典
+        alias_to_info: sheet名到文件信息的映射
+        start_row: 开始行号
+        output_file_path: 输出文件路径
+        external_links: 外部链接映射
     """
     # 获取列名到列号的映射
-    header_row = 1
-    col_name_to_idx = {}
-    for col_idx, cell in enumerate(ws[header_row], start=1):
-        if cell.value:
-            col_name_to_idx[str(cell.value)] = col_idx
+    col_names = _get_column_names(ws)
 
-    # 应用公式
     for col_name in formula_columns:
-        if col_name not in col_name_to_idx:
-            print(f"警告: 公式列 '{col_name}' 不在输出列中")
-            continue
-
         if col_name not in formula_templates:
-            print(f"警告: 没有找到列 '{col_name}' 的公式模板")
             continue
 
-        col_idx = col_name_to_idx[col_name]
-        formula_template = formula_templates[col_name]
+        formula = formula_templates[col_name]
+        col_idx = col_names.get(col_name)
 
-        # 为每一行应用公式
-        for row_idx in range(start_row, ws.max_row + 1):
-            # 计算行号偏移（相对于模板中的行号）
-            row_offset = row_idx - start_row
+        if col_idx:
+            _apply_formula_to_column(ws, col_idx, formula, alias_to_info,
+                                    start_row, output_file_path, external_links, col_name)
 
-            # 替换公式中的引用
-            new_formula = replace_sheet_references(formula_template, alias_to_info, row_offset, output_file_path, external_links)
 
-            # 写入公式
-            ws.cell(row=row_idx, column=col_idx).value = new_formula
+def _get_column_names(ws) -> Dict[str, int]:
+    """获取列名到列号的映射"""
+    col_names = {}
+    for col_idx, cell in enumerate(ws[1], start=1):
+        if cell.value:
+            col_names[str(cell.value)] = col_idx
+    return col_names
 
-    print(f"已应用公式到列: {formula_columns}")
 
+def _apply_formula_to_column(ws, col_idx: int, formula: str, alias_to_info: Dict,
+                             start_row: int, output_file_path: Optional[str],
+                             external_links: Optional[Dict], col_name: str) -> None:
+    """应用公式到整列"""
+    for row_idx in range(start_row, ws.max_row + 1):
+        row_offset = row_idx - start_row
+        adjusted_formula = replace_sheet_references(
+            formula, alias_to_info, row_offset, output_file_path, external_links
+        )
+        ws.cell(row=row_idx, column=col_idx).value = adjusted_formula
+
+    print(f"   已应用公式: {col_name} = {formula}")
+
+
+# ==================== 主函数：生成Excel ====================
 
 def generate_excel_from_template(
     template_file: str,
@@ -931,46 +914,15 @@ def generate_excel_from_template(
     Args:
         template_file: 模板文件路径
         template_sheet: 模板sheet名称
-        formula_columns: 公式列集合（这些列需要保留公式并处理sheet引用）
-        data_sources: 数据源集合，每个元素为字典格式:
-            {
-                'file_path': str,       # 数据文件路径
-                'sheet_name': str,      # sheet名称
-                'column_mappings': List[Dict],  # 列映射集合 [{'source': str, 'target': str}, ...]
-                'alias': str            # 别名（如"sheet0", "sheet1"）
-            }
+        formula_columns: 公式列集合
+        data_sources: 数据源集合
         output_file: 输出文件路径
-        string_columns: 字符串列列表（保持前导零等格式）
-        use_external_refs: 是否使用外部文件引用公式。
-            True: 公式使用外部引用（如 ='[sales.xlsx]Sheet1'!A1），需Excel打开
-            False: 直接写入数据值，只有本地计算公式（如 =A1+B1）保留公式
-        primary_column: 主键列名。当此列的值为空时，该行不会被添加到输出文件中。
-            为 None 时不进行过滤。
+        string_columns: 字符串列列表
+        use_external_refs: 是否使用外部引用公式
+        primary_column: 主键列名，为空时跳过过滤
 
     Returns:
         pd.DataFrame: 生成的数据
-
-    示例:
-        data_sources = [
-            {
-                'file_path': 'sales.xlsx',
-                'sheet_name': 'Sheet1',
-                'column_mappings': [
-                    {'source': 'SalesAmt', 'target': 'Sales'},
-                    {'source': 'Date', 'target': 'Date'}
-                ],
-                'alias': 'sheet0'
-            },
-            {
-                'file_path': 'costs.xlsx',
-                'sheet_name': 'Sheet1',
-                'column_mappings': [
-                    {'source': 'CostAmt', 'target': 'Cost'},
-                    {'source': 'Date', 'target': 'Date'}
-                ],
-                'alias': 'sheet1'
-            }
-        ]
     """
     # 确保输出文件路径是绝对路径
     if not os.path.isabs(output_file):
@@ -978,7 +930,43 @@ def generate_excel_from_template(
 
     print("=== Excel模板生成器 ===\n")
 
-    # 1. 验证阶段：检查所有文件和sheet是否存在
+    # 1. 验证文件
+    _validate_input_files(template_file, data_sources)
+
+    # 2. 分析模板
+    external_links, template_formulas, template_columns, template_ws = _analyze_template(
+        template_file, template_sheet, formula_columns
+    )
+
+    # 3. 加载数据源
+    loaded_data_sources, alias_to_info = _load_all_data_sources(
+        data_sources, output_file, template_sheet, string_columns
+    )
+
+    # 4. 合并数据
+    merged_df = merge_data_by_row(loaded_data_sources, template_columns)
+
+    # 5. 过滤数据
+    merged_df = _filter_data_by_primary_column(merged_df, primary_column)
+
+    # 6. 生成输出文件
+    _generate_output_file(
+        output_file, merged_df, template_columns, template_formulas,
+        formula_columns, alias_to_info, external_links, template_ws,
+        use_external_refs, string_columns
+    )
+
+    # 7. 打印公式汇总
+    _print_formula_summary(output_file)
+
+    # 关闭模板工作簿
+    template_ws.parent.close()
+
+    return merged_df
+
+
+def _validate_input_files(template_file: str, data_sources: List[Dict]) -> None:
+    """验证输入文件是否存在"""
     print("1. 验证文件...")
 
     if not os.path.exists(template_file):
@@ -990,15 +978,18 @@ def generate_excel_from_template(
 
     print("   所有文件验证通过\n")
 
-    # 2. 模板分析：读取模板列名、顺序和公式模式
+
+def _analyze_template(template_file: str, template_sheet: str,
+                      formula_columns: List[str]) -> Tuple:
+    """分析模板结构"""
     print("2. 分析模板...")
 
-    # 读取外部链接映射
     external_links = read_external_links(template_file)
+    template_columns, formula_templates, template_ws = read_template_structure(
+        template_file, template_sheet
+    )
 
-    template_columns, formula_templates, template_ws = read_template_structure(template_file, template_sheet)
-
-    # 收集模板中的公式（用于后续应用）
+    # 收集模板中的公式
     template_formulas = {}
     for col_name in formula_columns:
         if col_name in formula_templates:
@@ -1007,95 +998,118 @@ def generate_excel_from_template(
             print(f"   警告: 公式列 '{col_name}' 在模板中没有公式")
 
     print()
+    return external_links, template_formulas, template_columns, template_ws
 
-    # 3. 数据加载：读取各数据源，应用列映射
+
+def _load_all_data_sources(data_sources: List[Dict], output_file: str,
+                           template_sheet: str, string_columns: Optional[List[str]]) -> Tuple:
+    """加载所有数据源"""
     print("3. 加载数据源...")
 
-    # 构建数据源配置
     loaded_data_sources = []
-    alias_to_info = {}
+    alias_to_info = _init_alias_to_info(output_file, template_sheet)
 
-    # 首先将输出 sheet 本身作为 0 号
-    output_sheet_info = {
-        'file_path': output_file,  # 输出文件路径
-        'sheet_name': '结果'  # 输出 sheet 名称
-    }
-    alias_to_info['0'] = output_sheet_info
-
-    # 记录模板 sheet 名称到输出 sheet 信息的映射
-    # 用于处理模板自引用的情况（模板中引用的是 template_sheet，应该映射到输出文件的 '结果' sheet）
-    template_sheet_info = {
-        'file_path': output_file,
-        'sheet_name': '结果',
-        'is_template_self_reference': True  # 标记这是模板自引用的映射
-    }
-    alias_to_info[template_sheet.lower()] = template_sheet_info
-
-    # 按顺序为数据源分配编号（从1开始）
     for idx, ds in enumerate(data_sources, start=1):
-        # 构建列映射
-        column_mappings = [
-            DataColumnMapping(source_column=m['source'], target_column=m['target'])
-            for m in ds['column_mappings']
-        ]
-
-        config = DataSourceConfig(
-            file_path=ds['file_path'],
-            sheet_name=ds['sheet_name'],
-            column_mappings=column_mappings,
-            alias=ds.get('alias', '')
-        )
-
-        # 读取数据
+        config = _create_data_source_config(ds)
         df = read_data_source(config, string_columns)
         loaded_data_sources.append((config.alias, df))
 
-        # 构建info字典
-        info = {
-            'file_path': config.file_path,
-            'sheet_name': config.sheet_name
-        }
+        _update_alias_mapping(alias_to_info, str(idx), config)
 
-        # 记录数字索引（1, 2, 3...）到文件信息的映射
-        alias_to_info[str(idx)] = info
+    _print_data_source_mapping(output_file, data_sources)
+    print()
 
-        # 记录别名到文件信息的映射（如果有别名）
-        if config.alias:
-            alias_to_info[config.alias.lower()] = info
+    return loaded_data_sources, alias_to_info
 
-        # 同时记录实际sheet名到文件信息的映射（支持模板中直接使用实际sheet名）
-        alias_to_info[config.sheet_name.lower()] = info
 
-    # 打印数据源编号映射
+def _init_alias_to_info(output_file: str, template_sheet: str) -> Dict:
+    """初始化别名映射"""
+    alias_to_info = {}
+
+    # 输出 sheet 作为 0 号
+    alias_to_info['0'] = {
+        'file_path': output_file,
+        'sheet_name': '结果'
+    }
+
+    # 模板 sheet 映射到输出 sheet
+    alias_to_info[template_sheet.lower()] = {
+        'file_path': output_file,
+        'sheet_name': '结果',
+        'is_template_self_reference': True
+    }
+
+    return alias_to_info
+
+
+def _create_data_source_config(ds: Dict) -> DataSourceConfig:
+    """创建数据源配置"""
+    column_mappings = [
+        DataColumnMapping(source_column=m['source'], target_column=m['target'])
+        for m in ds['column_mappings']
+    ]
+
+    return DataSourceConfig(
+        file_path=ds['file_path'],
+        sheet_name=ds['sheet_name'],
+        column_mappings=column_mappings,
+        alias=ds.get('alias', '')
+    )
+
+
+def _update_alias_mapping(alias_to_info: Dict, idx: str, config: DataSourceConfig) -> None:
+    """更新别名映射"""
+    info = {
+        'file_path': config.file_path,
+        'sheet_name': config.sheet_name
+    }
+
+    alias_to_info[idx] = info
+
+    if config.alias:
+        alias_to_info[config.alias.lower()] = info
+
+    alias_to_info[config.sheet_name.lower()] = info
+
+
+def _print_data_source_mapping(output_file: str, data_sources: List[Dict]) -> None:
+    """打印数据源映射"""
     print(f"   数据源编号映射:")
     print(f"     [0] -> 输出文件: {os.path.basename(output_file)} (sheet: 结果)")
+
     for idx, ds in enumerate(data_sources, start=1):
         print(f"     [{idx}] -> {os.path.basename(ds['file_path'])} (sheet: {ds['sheet_name']})")
 
-    print()
 
-    # 4. 数据合并：按行号对齐合并
-    print("4. 合并数据...")
-    merged_df = merge_data_by_row(loaded_data_sources, template_columns)
+def _filter_data_by_primary_column(merged_df: pd.DataFrame,
+                                    primary_column: Optional[str]) -> pd.DataFrame:
+    """根据主键列过滤数据"""
+    if not primary_column:
+        return merged_df
 
-    # 5. 数据过滤：根据主键列过滤空值行
-    if primary_column:
-        if primary_column in merged_df.columns:
-            original_count = len(merged_df)
-            # 过滤掉主键列为空（NaN、None、空字符串）的行
-            merged_df = merged_df[
-                merged_df[primary_column].notna() &
-                (merged_df[primary_column].astype(str).str.strip() != '')
-            ]
-            filtered_count = len(merged_df)
-            if original_count > filtered_count:
-                print(f"   过滤掉 {original_count - filtered_count} 行（{primary_column} 列为空）")
-        else:
-            print(f"   警告: 主键列 '{primary_column}' 不存在于数据中，跳过过滤")
+    if primary_column not in merged_df.columns:
+        print(f"   警告: 主键列 '{primary_column}' 不存在于数据中，跳过过滤")
+        return merged_df
 
-    print()
+    original_count = len(merged_df)
+    merged_df = merged_df[
+        merged_df[primary_column].notna() &
+        (merged_df[primary_column].astype(str).str.strip() != '')
+    ]
 
-    # 6. 输出生成：写入数据，应用公式，保存文件
+    filtered_count = len(merged_df)
+    if original_count > filtered_count:
+        print(f"   过滤掉 {original_count - filtered_count} 行（{primary_column} 列为空）")
+
+    return merged_df
+
+
+def _generate_output_file(output_file: str, merged_df: pd.DataFrame,
+                          template_columns: List[str], template_formulas: Dict,
+                          formula_columns: List[str], alias_to_info: Dict,
+                          external_links: Dict, template_ws,
+                          use_external_refs: bool, string_columns: Optional[List[str]]) -> None:
+    """生成输出文件"""
     print("5. 生成输出文件...")
 
     if use_external_refs:
@@ -1103,147 +1117,151 @@ def generate_excel_from_template(
     else:
         print("   模式: 直接写入数据值")
 
-    # 创建输出文件
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         output_df = merged_df.copy()
 
-        if use_external_refs:
-            # 外部引用模式：清空公式列的数据，后面填充外部引用公式
-            for col in formula_columns:
-                if col in output_df.columns:
-                    output_df[col] = None
-        else:
-            # 直接数据模式：保留数据值，只处理本地计算公式
-            # 找出哪些公式列包含外部引用
-            # 外部引用格式包括: sheet0!, sheet1! 或 [N]SheetName! 或 '[file]Sheet'!
-            external_ref_columns = []
-            local_formula_columns = []
-
-            # 外部引用的正则模式
-            external_ref_pattern = r"(sheet\d+!|\[[^\]]+\][^!'\s]+!|'\[[^\]]+\][^']+'\!)"
-
-            for col in formula_columns:
-                if col in template_formulas:
-                    formula = template_formulas[col]
-                    # 检查是否包含外部引用
-                    if re.search(external_ref_pattern, formula, re.IGNORECASE):
-                        external_ref_columns.append(col)
-                    else:
-                        local_formula_columns.append(col)
-
-            # 清空本地计算公式列（这些会填充公式）
-            for col in local_formula_columns:
-                if col in output_df.columns:
-                    output_df[col] = None
-
-            # 外部引用列保留数据值
-            print(f"   数据值列: {external_ref_columns}")
-            print(f"   本地公式列: {local_formula_columns}")
+        # 准备输出DataFrame
+        local_formula_columns = _prepare_output_df(
+            output_df, template_formulas, formula_columns, use_external_refs
+        )
 
         output_df.to_excel(writer, sheet_name='结果', index=False)
-
-        # 获取工作表
         ws = writer.sheets['结果']
 
         # 应用公式
-        if formula_columns and template_formulas:
-            if use_external_refs:
-                # 外部引用模式：应用所有公式
-                apply_formulas_to_output(
-                    ws,
-                    formula_columns,
-                    template_formulas,
-                    alias_to_info,
-                    start_row=2,
-                    output_file_path=output_file,
-                    external_links=external_links
-                )
-            else:
-                # 直接数据模式：只应用本地计算公式
-                # 使用与前面相同的外部引用正则模式
-                external_ref_pattern = r"(sheet\d+!|\[[^\]]+\][^!'\s]+!|'\[[^\]]+\][^']+'\!)"
-
-                for col in formula_columns:
-                    if col in template_formulas:
-                        formula = template_formulas[col]
-                        # 只处理不包含外部引用的公式
-                        if not re.search(external_ref_pattern, formula, re.IGNORECASE):
-                            # 获取列号
-                            col_idx = None
-                            for c_idx, c_name in enumerate(output_df.columns, start=1):
-                                if c_name == col:
-                                    col_idx = c_idx
-                                    break
-
-                            if col_idx:
-                                # 为每一行应用公式
-                                for row_idx in range(2, ws.max_row + 1):
-                                    row_offset = row_idx - 2
-                                    # 传入 alias_to_info 以支持 sheet 引用替换
-                                    adjusted_formula = replace_sheet_references(
-                                        formula, alias_to_info, row_offset, output_file, external_links
-                                    )
-                                    ws.cell(row=row_idx, column=col_idx).value = adjusted_formula
-
-                                print(f"   已应用公式: {col} = {formula}")
+        _apply_formulas(
+            ws, output_df, template_formulas, formula_columns,
+            alias_to_info, output_file, external_links, use_external_refs, local_formula_columns
+        )
 
         # 应用模板样式
         apply_template_styles(ws, template_ws, template_columns, len(output_df) + 1)
 
         # 处理字符串列格式
         if string_columns:
-            from openpyxl.styles import Font
-
-            for col_idx, col_name in enumerate(output_df.columns, start=1):
-                if col_name in string_columns:
-                    # 设置列宽
-                    ws.column_dimensions[get_column_letter(col_idx)].width = 15
-
-                    # 设置格式为文本
-                    for row in range(2, len(output_df) + 2):
-                        cell = ws.cell(row=row, column=col_idx)
-                        cell.number_format = '@'
-
-                        # 确保数据是字符串
-                        if pd.notna(output_df.iloc[row - 2][col_name]):
-                            cell.value = str(output_df.iloc[row - 2][col_name])
+            _apply_string_column_format(ws, output_df, string_columns)
 
     print(f"\n输出文件已保存: {output_file}")
 
-    # 打印最终文件中的公式汇总
+
+def _prepare_output_df(output_df: pd.DataFrame, template_formulas: Dict,
+                        formula_columns: List[str], use_external_refs: bool) -> List[str]:
+    """准备输出DataFrame"""
+    external_ref_pattern = r"(sheet\d+!|\[[^\]]+\][^!'\s]+!|'\[[^\]]+\][^']+'\!)"
+
+    if use_external_refs:
+        # 外部引用模式：清空公式列
+        for col in formula_columns:
+            if col in output_df.columns:
+                output_df[col] = None
+        return []
+
+    # 直接数据模式：区分外部引用和本地公式
+    external_ref_columns = []
+    local_formula_columns = []
+
+    for col in formula_columns:
+        if col in template_formulas:
+            formula = template_formulas[col]
+            if re.search(external_ref_pattern, formula, re.IGNORECASE):
+                external_ref_columns.append(col)
+            else:
+                local_formula_columns.append(col)
+
+    # 清空本地公式列
+    for col in local_formula_columns:
+        if col in output_df.columns:
+            output_df[col] = None
+
+    print(f"   数据值列: {external_ref_columns}")
+    print(f"   本地公式列: {local_formula_columns}")
+
+    return local_formula_columns
+
+
+def _apply_formulas(ws, output_df: pd.DataFrame, template_formulas: Dict,
+                    formula_columns: List[str], alias_to_info: Dict,
+                    output_file: str, external_links: Dict,
+                    use_external_refs: bool, local_formula_columns: List[str]) -> None:
+    """应用公式到工作表"""
+    if not formula_columns or not template_formulas:
+        return
+
+    if use_external_refs:
+        apply_formulas_to_output(
+            ws, formula_columns, template_formulas, alias_to_info,
+            start_row=2, output_file_path=output_file, external_links=external_links
+        )
+    else:
+        _apply_local_formulas(ws, output_df, template_formulas,
+                              local_formula_columns, alias_to_info, output_file, external_links)
+
+
+def _apply_local_formulas(ws, output_df: pd.DataFrame, template_formulas: Dict,
+                          local_formula_columns: List[str], alias_to_info: Dict,
+                          output_file: str, external_links: Dict) -> None:
+    """应用本地公式"""
+    for col in local_formula_columns:
+        if col not in template_formulas:
+            continue
+
+        formula = template_formulas[col]
+        col_idx = _find_column_index(output_df, col)
+
+        if col_idx:
+            for row_idx in range(2, ws.max_row + 1):
+                row_offset = row_idx - 2
+                adjusted_formula = replace_sheet_references(
+                    formula, alias_to_info, row_offset, output_file, external_links
+                )
+                ws.cell(row=row_idx, column=col_idx).value = adjusted_formula
+
+            print(f"   已应用公式: {col} = {formula}")
+
+
+def _find_column_index(df: pd.DataFrame, col_name: str) -> Optional[int]:
+    """查找列索引"""
+    for c_idx, c_name in enumerate(df.columns, start=1):
+        if c_name == col_name:
+            return c_idx
+    return None
+
+
+def _apply_string_column_format(ws, output_df: pd.DataFrame, string_columns: List[str]) -> None:
+    """应用字符串列格式"""
+    from openpyxl.styles import Font
+
+    for col_idx, col_name in enumerate(output_df.columns, start=1):
+        if col_name not in string_columns:
+            continue
+
+        ws.column_dimensions[get_column_letter(col_idx)].width = 15
+
+        for row in range(2, len(output_df) + 2):
+            cell = ws.cell(row=row, column=col_idx)
+            cell.number_format = '@'
+
+            if pd.notna(output_df.iloc[row - 2][col_name]):
+                cell.value = str(output_df.iloc[row - 2][col_name])
+
+
+def _print_formula_summary(output_file: str) -> None:
+    """打印公式汇总"""
     print("\n" + "=" * 70)
     print("最终文件公式汇总")
     print("=" * 70)
 
-    # 重新读取输出文件，打印所有公式
     try:
         wb_output = openpyxl.load_workbook(output_file, data_only=False)
         ws_output = wb_output.active
 
-        # 获取列名
-        header_row = 1
-        col_names = {}
-        for col_idx, cell in enumerate(ws_output[header_row], start=1):
-            if cell.value:
-                col_names[col_idx] = str(cell.value)
+        col_names = _read_output_column_names(ws_output)
+        formulas = _read_output_formulas(ws_output, col_names)
 
-        # 读取第二行的公式（代表所有行的公式模式）
-        formulas_in_output = {}
-        if ws_output.max_row >= 2:
-            for col_idx in range(1, ws_output.max_column + 1):
-                cell = ws_output.cell(row=2, column=col_idx)
-                if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
-                    col_name = col_names.get(col_idx, f"列{col_idx}")
-                    formulas_in_output[col_name] = cell.value
-
-        if formulas_in_output:
-            print(f"\n公式列数: {len(formulas_in_output)}")
-            for col_name, formula in formulas_in_output.items():
-                # 截断过长的公式
-                if len(formula) > 100:
-                    formula_display = formula[:100] + "..."
-                else:
-                    formula_display = formula
+        if formulas:
+            print(f"\n公式列数: {len(formulas)}")
+            for col_name, formula in formulas.items():
+                formula_display = formula[:100] + "..." if len(formula) > 100 else formula
                 print(f"  {col_name}: {formula_display}")
         else:
             print("\n无公式列（所有数据均为直接值）")
@@ -1254,24 +1272,50 @@ def generate_excel_from_template(
 
     print("=" * 70)
 
-    # 关闭模板工作簿
-    template_ws.parent.close()
 
-    return merged_df
+def _read_output_column_names(ws) -> Dict[int, str]:
+    """读取输出文件的列名"""
+    col_names = {}
+    for col_idx, cell in enumerate(ws[1], start=1):
+        if cell.value:
+            col_names[col_idx] = str(cell.value)
+    return col_names
 
 
-# 命令行解析辅助函数
+def _read_output_formulas(ws, col_names: Dict[int, str]) -> Dict[str, str]:
+    """读取输出文件的公式"""
+    formulas = {}
+
+    if ws.max_row < 2:
+        return formulas
+
+    for col_idx in range(1, ws.max_column + 1):
+        cell = ws.cell(row=2, column=col_idx)
+        if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
+            col_name = col_names.get(col_idx, f"列{col_idx}")
+            formulas[col_name] = cell.value
+
+    return formulas
+
+
+# ==================== 命令行解析辅助函数 ====================
+
 def parse_column_mappings(mappings_str: str) -> List[Dict[str, str]]:
     """
     解析列映射字符串
 
     Args:
-        mappings_str: 列映射字符串，格式: "SourceCol1:TargetCol1,SourceCol2:TargetCol2"
+        mappings_str: 列映射字符串，格式为 "SourceCol:TargetCol,SourceCol2:TargetCol2"
+                      或 "Col1,Col2"（源列名和目标列名相同）
 
     Returns:
         List[Dict[str, str]]: 列映射列表
     """
     mappings = []
+
+    if not mappings_str:
+        return mappings
+
     pairs = mappings_str.split(',')
 
     for pair in pairs:
@@ -1282,54 +1326,12 @@ def parse_column_mappings(mappings_str: str) -> List[Dict[str, str]]:
                 'target': target.strip()
             })
         else:
-            # 如果没有冒号，源列和目标列相同
-            col = pair.strip()
-            mappings.append({
-                'source': col,
-                'target': col
-            })
+            # 不带冒号时，源列名和目标列名相同
+            col_name = pair.strip()
+            if col_name:
+                mappings.append({
+                    'source': col_name,
+                    'target': col_name
+                })
 
     return mappings
-
-
-if __name__ == "__main__":
-    # 示例使用
-    print("=== Excel模板生成器示例 ===\n")
-
-    # 注意：此示例需要先创建测试文件
-    # 实际使用时请确保文件存在
-
-    print("使用方法:")
-    print("""
-    from modules.template_generator import generate_excel_from_template
-
-    data_sources = [
-        {
-            'file_path': 'sales.xlsx',
-            'sheet_name': 'Sheet1',
-            'column_mappings': [
-                {'source': 'SalesAmt', 'target': 'Sales'},
-                {'source': 'Date', 'target': 'Date'}
-            ],
-            'alias': 'sheet0'
-        },
-        {
-            'file_path': 'costs.xlsx',
-            'sheet_name': 'Sheet1',
-            'column_mappings': [
-                {'source': 'CostAmt', 'target': 'Cost'},
-                {'source': 'Date', 'target': 'Date'}
-            ],
-            'alias': 'sheet1'
-        }
-    ]
-
-    result = generate_excel_from_template(
-        template_file='template.xlsx',
-        template_sheet='Sheet1',
-        formula_columns=['Total', 'Profit'],
-        data_sources=data_sources,
-        output_file='output.xlsx',
-        string_columns=['Date']
-    )
-    """)
