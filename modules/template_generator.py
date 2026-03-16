@@ -41,6 +41,75 @@ class CellStyle:
     protection: Optional[Dict[str, Any]] = None
 
 
+def copy_color(source_color):
+    """
+    复制颜色对象，支持 RGB、主题、索引和自动颜色
+
+    Args:
+        source_color: 源颜色对象 (openpyxl.styles.colors.Color)
+
+    Returns:
+        新的 Color 对象，或原始颜色值（RGB字符串）
+    """
+    from openpyxl.styles.colors import Color
+
+    if source_color is None:
+        return None
+
+    # 首先检查颜色类型，然后根据类型进行相应的处理
+    color_type = getattr(source_color, 'type', None)
+
+    # 检查是否为 RGB 颜色
+    if color_type == 'rgb' and hasattr(source_color, 'rgb'):
+        if isinstance(source_color.rgb, str) and source_color.rgb:
+            return source_color.rgb  # 返回字符串，PatternFill可以直接使用
+
+    # 检查是否为主题颜色
+    if color_type == 'theme' and hasattr(source_color, 'theme'):
+        try:
+            theme_val = int(source_color.theme)
+            tint_val = float(source_color.tint) if source_color.tint else 0
+            return Color(theme=theme_val, tint=tint_val)
+        except (TypeError, ValueError):
+            pass
+
+    # 检查是否为索引颜色
+    if color_type == 'indexed' and hasattr(source_color, 'indexed'):
+        try:
+            indexed_val = int(source_color.indexed)
+            return Color(indexed=indexed_val)
+        except (TypeError, ValueError):
+            pass
+
+    # 检查是否为自动颜色
+    if color_type == 'auto' or (hasattr(source_color, 'auto') and source_color.auto):
+        return Color(auto=True)
+
+    # 无法识别的颜色类型，返回原始对象
+    return source_color
+
+
+def copy_side(source_side):
+    """
+    复制边框线样式（Side对象），正确处理颜色
+
+    Args:
+        source_side: 源边框线对象
+
+    Returns:
+        新的 Side 对象
+    """
+    if source_side is None or source_side.border_style is None:
+        return None
+
+    color = copy_color(source_side.color) if source_side.color else None
+
+    return Side(
+        style=source_side.border_style,
+        color=color
+    )
+
+
 def copy_cell_style(source_cell, target_cell) -> None:
     """
     复制单元格样式
@@ -63,13 +132,36 @@ def copy_cell_style(source_cell, target_cell) -> None:
                 'strike': source_cell.font.strike,
             }
 
-            # 处理颜色
-            if source_cell.font.color and hasattr(source_cell.font.color, 'rgb'):
-                font_args['color'] = source_cell.font.color
-            else:
-                # 默认黑色
+            # 处理字体颜色 - 首先检查颜色类型
+            if source_cell.font.color:
                 from openpyxl.styles.colors import Color
-                font_args['color'] = Color(rgb='FF0000')
+                src_color = source_cell.font.color
+                color_type = getattr(src_color, 'type', None)
+
+                # 根据 color.type 判断颜色类型
+                if color_type == 'rgb' and hasattr(src_color, 'rgb'):
+                    if isinstance(src_color.rgb, str) and src_color.rgb:
+                        font_args['color'] = Color(rgb=src_color.rgb)
+                    else:
+                        font_args['color'] = src_color
+                elif color_type == 'theme' and hasattr(src_color, 'theme'):
+                    try:
+                        theme_val = int(src_color.theme)
+                        tint_val = float(src_color.tint) if src_color.tint else 0
+                        font_args['color'] = Color(theme=theme_val, tint=tint_val)
+                    except (TypeError, ValueError):
+                        font_args['color'] = src_color
+                elif color_type == 'indexed' and hasattr(src_color, 'indexed'):
+                    try:
+                        indexed_val = int(src_color.indexed)
+                        font_args['color'] = Color(indexed=indexed_val)
+                    except (TypeError, ValueError):
+                        font_args['color'] = src_color
+                elif color_type == 'auto' or (hasattr(src_color, 'auto') and src_color.auto):
+                    font_args['color'] = Color(auto=True)
+                else:
+                    # 无法识别的颜色类型，保持原样复制整个颜色对象
+                    font_args['color'] = src_color
 
             target_cell.font = Font(**font_args)
 
@@ -88,26 +180,41 @@ def copy_cell_style(source_cell, target_cell) -> None:
                 elif fill_type == 'gray0625':
                     target_cell.fill = PatternFill(fill_type='gray0625')
                 elif fill_type == 'solid':
-                    # 对于实心填充，使用最简单的方法
-                    if source_cell.fill.start_color:
-                        # 获取RGB值
-                        if hasattr(source_cell.fill.start_color, 'rgb'):
-                            rgb_value = source_cell.fill.start_color.rgb
-                            if rgb_value:
-                                target_cell.fill = PatternFill(
-                                    fill_type='solid',
-                                    start_color=rgb_value,
-                                    end_color=rgb_value
-                                )
-                            else:
-                                # 无RGB值，默认白色
-                                target_cell.fill = PatternFill(fill_type='solid', start_color='FFFFFF')
+                    # 对于实心填充，正确处理各种颜色类型
+                    from openpyxl.styles.colors import Color
+                    start_color = source_cell.fill.start_color
+                    end_color = source_cell.fill.end_color
+
+                    if start_color:
+                        # 获取颜色值 - 支持RGB、主题、索引颜色
+                        color_value = None
+
+                        # 检查是否为有效的 RGB 颜色（字符串类型）
+                        if hasattr(start_color, 'rgb') and isinstance(start_color.rgb, str) and start_color.rgb:
+                            color_value = start_color.rgb
+                        # 检查是否为主题颜色
+                        elif hasattr(start_color, 'theme') and start_color.theme is not None:
+                            color_value = Color(theme=start_color.theme, tint=start_color.tint or 0)
+                        # 检查是否为索引颜色
+                        elif hasattr(start_color, 'indexed') and start_color.indexed is not None:
+                            color_value = Color(indexed=start_color.indexed)
+
+                        if color_value is not None:
+                            target_cell.fill = PatternFill(
+                                fill_type='solid',
+                                start_color=color_value,
+                                end_color=color_value
+                            )
                         else:
-                            # 没有rgb属性，默认白色
-                            target_cell.fill = PatternFill(fill_type='solid', start_color='FFFFFF')
+                            # 无法识别的颜色类型，直接复制颜色对象
+                            target_cell.fill = PatternFill(
+                                fill_type='solid',
+                                start_color=start_color,
+                                end_color=end_color if end_color else start_color
+                            )
                     else:
-                        # 无颜色，默认白色
-                        target_cell.fill = PatternFill(fill_type='solid', start_color='FFFFFF')
+                        # 无颜色，保持无填充
+                        target_cell.fill = PatternFill(fill_type='none')
                 else:
                     # 其他填充类型，直接尝试复制类型
                     target_cell.fill = PatternFill(fill_type=fill_type)
@@ -122,18 +229,18 @@ def copy_cell_style(source_cell, target_cell) -> None:
                 except Exception as e2:
                     print(f"⚠️ 跳过填充样式复制（错误: {e}）")
 
-        # 复制边框
+        # 复制边框 - 使用 copy_side 正确处理边框颜色
         if source_cell.border:
             target_cell.border = Border(
-                left=source_cell.border.left,
-                right=source_cell.border.right,
-                top=source_cell.border.top,
-                bottom=source_cell.border.bottom,
-                diagonal=source_cell.border.diagonal,
+                left=copy_side(source_cell.border.left),
+                right=copy_side(source_cell.border.right),
+                top=copy_side(source_cell.border.top),
+                bottom=copy_side(source_cell.border.bottom),
+                diagonal=copy_side(source_cell.border.diagonal),
                 diagonal_direction=source_cell.border.diagonal_direction,
                 outline=source_cell.border.outline,
-                horizontal=source_cell.border.horizontal,
-                vertical=source_cell.border.vertical
+                horizontal=copy_side(source_cell.border.horizontal),
+                vertical=copy_side(source_cell.border.vertical)
             )
 
         # 复制对齐
