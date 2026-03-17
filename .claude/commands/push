@@ -1,0 +1,40 @@
+#!/bin/bash
+# 自动提交并推送代码到 GitHub
+# 用法: push [commit_message]
+
+set -e
+
+# 获取提交信息（如果提供）
+COMMIT_MSG="$1"
+
+# 检查是否有更改
+if git diff --quiet && git diff --cached --quiet; then
+    echo "没有检测到更改，跳过提交。"
+    exit 0
+fi
+
+# 如果没有提供提交信息，自动生成
+if [ -z "$COMMIT_MSG" ]; then
+    # 获取更改的文件统计
+    CHANGES=$(git diff --stat)
+    FILES=$(git diff --name-only)
+
+    # 根据更改的文件生成简单的提交信息
+    COMMIT_MSG="chore: 更新代码
+
+更改的文件:
+$FILES"
+fi
+
+# 添加所有更改
+git add -A
+
+# 提交
+git commit -m "$COMMIT_MSG
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+
+# 推送
+git push origin main
+
+echo "✓ 代码已推送到 GitHub"
