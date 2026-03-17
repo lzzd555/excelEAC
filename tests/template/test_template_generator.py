@@ -195,6 +195,107 @@ def test_cli():
     print("\n请手动运行上述命令进行测试")
 
 
+def test_internal_vs_external_refs():
+    """测试内部引用模式和外部引用模式的区别"""
+    print("\n=== 测试内部引用 vs 外部引用模式 ===")
+
+    test_dir = os.path.dirname(os.path.abspath(__file__))
+    from create_test_data import create_sales_data, create_costs_data, create_template_with_external_ref
+
+    sales_file = create_sales_data()
+    costs_file = create_costs_data()
+    template_file = create_template_with_external_ref()
+
+    data_sources = [
+        {
+            'file_path': sales_file,
+            'sheet_name': 'Data',
+            'column_mappings': [
+                {'source': 'Date', 'target': 'Date'},
+                {'source': 'SalesAmt', 'target': 'Sales'}
+            ],
+            'alias': 'sheet0'
+        },
+        {
+            'file_path': costs_file,
+            'sheet_name': 'Data',
+            'column_mappings': [
+                {'source': 'Date', 'target': 'Date'},
+                {'source': 'CostAmt', 'target': 'Cost'}
+            ],
+            'alias': 'sheet1'
+        }
+    ]
+
+    # 测试内部引用模式（默认，use_external_refs=False）
+    print("\n--- 内部引用模式 (use_external_refs=False) ---")
+    internal_output = os.path.join(test_dir, 'output_internal.xlsx')
+    generate_excel_from_template(
+        template_file=template_file,
+        template_sheet='Sheet1',
+        formula_columns=['Sales', 'Cost', 'Profit'],
+        data_sources=data_sources,
+        output_file=internal_output,
+        string_columns=['Date'],
+        use_external_refs=False
+    )
+
+    # 验证内部引用模式
+    import openpyxl
+    wb_internal = openpyxl.load_workbook(internal_output)
+    print(f"   Sheet数量: {len(wb_internal.sheetnames)}")
+    print(f"   Sheet列表: {wb_internal.sheetnames}")
+
+    # 检查公式是否使用内部引用
+    ws_internal = wb_internal['结果']
+    sales_formula = ws_internal.cell(row=2, column=2).value
+    print(f"   Sales公式: {sales_formula}")
+    assert 'sheet0!' in sales_formula, f"内部引用应使用sheet名，而不是文件路径: {sales_formula}"
+    assert '[' not in sales_formula, f"内部引用不应包含文件路径: {sales_formula}"
+    print("   ✓ 内部引用格式正确")
+
+    # 检查数据源sheet是否存在
+    assert 'sheet0' in wb_internal.sheetnames, "数据源sheet0应存在于输出文件中"
+    assert 'sheet1' in wb_internal.sheetnames, "数据源sheet1应存在于输出文件中"
+    print("   ✓ 数据源sheet已复制到输出文件")
+
+    wb_internal.close()
+
+    # 测试外部引用模式（use_external_refs=True）
+    print("\n--- 外部引用模式 (use_external_refs=True) ---")
+    external_output = os.path.join(test_dir, 'output_external.xlsx')
+    generate_excel_from_template(
+        template_file=template_file,
+        template_sheet='Sheet1',
+        formula_columns=['Sales', 'Cost', 'Profit'],
+        data_sources=data_sources,
+        output_file=external_output,
+        string_columns=['Date'],
+        use_external_refs=True
+    )
+
+    # 验证外部引用模式
+    wb_external = openpyxl.load_workbook(external_output)
+    print(f"   Sheet数量: {len(wb_external.sheetnames)}")
+    print(f"   Sheet列表: {wb_external.sheetnames}")
+
+    # 检查公式是否使用外部引用
+    ws_external = wb_external['结果']
+    sales_formula = ws_external.cell(row=2, column=2).value
+    print(f"   Sales公式: {sales_formula}")
+    assert '[' in sales_formula, f"外部引用应包含文件路径: {sales_formula}"
+    print("   ✓ 外部引用格式正确")
+
+    # 检查数据源sheet是否不存在
+    assert 'sheet0' not in wb_external.sheetnames, "数据源sheet不应存在于输出文件中（外部引用模式）"
+    assert 'sheet1' not in wb_external.sheetnames, "数据源sheet不应存在于输出文件中（外部引用模式）"
+    print("   ✓ 数据源sheet未复制到输出文件")
+
+    wb_external.close()
+
+    print("\n内部引用 vs 外部引用测试通过！")
+
+
 def main():
     print("=== 模板生成器测试 ===\n")
 
@@ -205,6 +306,9 @@ def main():
 
     # 集成测试
     test_full_generation()
+
+    # 内部引用 vs 外部引用模式测试
+    test_internal_vs_external_refs()
 
     # CLI测试提示
     test_cli()

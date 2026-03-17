@@ -162,7 +162,7 @@ def run_template(args):
             data_sources=data_sources,
             output_file=args.output,
             string_columns=string_columns,
-            use_external_refs=not args.direct_values,
+            use_external_refs=args.external_refs,
             primary_column=args.primary_column
         )
 
@@ -236,8 +236,10 @@ def main():
                                   help='数据源（可多次使用）。格式: file_path sheet_name "SrcCol:TgtCol,..." alias')
     template_parser.add_argument('-o', '--output', default='output.xlsx', help='输出文件名')
     template_parser.add_argument('--string-columns', help='字符串列名（逗号分隔）')
-    template_parser.add_argument('--direct-values', action='store_true',
-                                  help='直接写入数据值而非外部引用公式（适用于Numbers等不支持外部引用的软件）')
+    template_parser.add_argument('--direct-values', action='store_true', default=True,
+                                  help='将数据源sheet复制到输出文件，公式使用内部引用（默认启用）')
+    template_parser.add_argument('--external-refs', action='store_true',
+                                  help='使用外部文件引用公式，不复制数据源sheet（需Excel打开才能正常显示）')
     template_parser.add_argument('--primary-column', help='主键列名。当此列的值为空时，该行不会被添加到输出文件中')
 
     # 解析参数

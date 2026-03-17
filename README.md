@@ -40,8 +40,8 @@
 - **实际Sheet名支持**：模板中可直接使用实际sheet名（如 `'ESDP-Bpart'!A:A`），自动匹配对应文件
 - **列映射功能**：支持源列名到目标列名的映射
 - **两种数据写入模式**：
-  - 外部引用模式（默认）：使用Excel外部引用公式，数据与源文件保持链接
-  - 直接值模式（`--direct-values`）：直接写入数据值，适用于Numbers等不支持外部引用的软件
+  - 内部引用模式（默认）：将数据源sheet复制到输出文件，公式直接引用内部sheet
+  - 外部引用模式（`--external-refs`）：公式使用外部文件引用，数据与源文件保持链接
 - **公式仅数据源**：支持仅在公式中引用的数据源（无需列映射）
 
 ## 安装要求
@@ -183,7 +183,7 @@ python main.py template -t template.xlsx -ts Sheet1 -f "Sales,Cost,Profit" \
 - `-d, --data-source`: 数据源（可多次使用）。格式: `file_path sheet_name "SrcCol:TgtCol,..." alias`
 - `-o, --output`: 输出文件名（默认：output.xlsx）
 - `--string-columns`: 字符串列名，逗号分隔（可选）
-- `--direct-values`: 直接写入数据值而非外部引用公式（适用于Numbers等不支持外部引用的软件）
+- `--external-refs`: 使用外部文件引用公式，不复制数据源sheet（需Excel打开才能正常显示）
 
 ## 验证模块使用示例
 
@@ -369,13 +369,18 @@ result = generate_excel_from_template(
 # 公式会被正确转换为外部文件引用
 ```
 
-### 示例4：直接值模式（Numbers兼容）
+### 示例4：外部引用模式
 
 ```bash
-# 使用 --direct-values 参数直接写入数据值
+# 使用 --external-refs 参数，公式引用外部文件
 python main.py template -t template.xlsx -ts Sheet1 \
     -d sales.xlsx Data "SalesAmt:Sales" sheet0 \
-    -o result.xlsx --direct-values
+    -o result.xlsx --external-refs
+
+# 默认模式（内部引用）：数据源sheet复制到输出文件，公式使用内部引用
+python main.py template -t template.xlsx -ts Sheet1 \
+    -d sales.xlsx Data "SalesAmt:Sales" sheet0 \
+    -o result.xlsx
 ```
 
 ```
@@ -419,7 +424,7 @@ python main.py template -t template.xlsx -ts Sheet1 \
 | data_sources | List[Dict] | 是 | 数据源配置列表 |
 | output_file | str | 否 | 输出文件名（默认output.xlsx） |
 | string_columns | List[str] | 否 | 需要保持为字符串格式的列名列表 |
-| use_external_refs | bool | 否 | 是否使用外部引用（默认True），False则直接写入数据值 |
+| use_external_refs | bool | 否 | 是否使用外部引用（默认False）。False时复制数据源sheet到输出文件，True时使用外部文件引用 |
 
 **数据源配置（data_sources中的每个元素）：**
 
@@ -559,7 +564,8 @@ python run_tests.py
 7. **模板生成模块**：
    - 公式中的sheet名可以使用别名（sheet0, sheet1）或实际sheet名
    - 支持复杂嵌套公式和整列引用（A:A）
-   - 使用 `--direct-values` 参数可直接写入数据值（适用于Numbers等不支持外部引用的软件）
+   - 默认模式：数据源sheet复制到输出文件，公式使用内部引用
+   - 使用 `--external-refs` 参数可使用外部文件引用（需Excel打开才能正常显示）
    - 数据源可以只用于公式引用（column_mappings为空）
 
 ## 许可证

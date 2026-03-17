@@ -1,6 +1,9 @@
 {
   "permissions": {
     "allow": [
+      "Bash(python*)",
+      "Bash(git*)",
+      "Bash(ls*)",
       "Bash(git push)",
       "Bash(python test_standard.py)",
       "Bash(git add excel_validator.py test_standard.py test_abnormal_detail.py)",
@@ -25,7 +28,15 @@
       "Bash(python -m unittest tests.merge.test_column_mapping.TestColumnMapping.test_no_extra_columns -v)",
       "Bash(python -m unittest tests.merge.test_column_mapping.TestColumnMapping.test_partial_mapping_with_same_names -v)",
       "Bash(python debug_merge.py)",
-      "Bash(python debug_merge_with_string_columns.py)"
+      "Bash(python debug_merge_with_string_columns.py)",
+      "Bash(python test_fill_styles.py)",
+      "Bash(python debug_fill_styles.py)",
+      "Bash(python test_fill_detailed.py)",
+      "Bash(python debug_template_fills.py)",
+      "Bash(python test_all_styles.py)",
+      "Bash(python test_complete_styles.py)",
+      "Bash(python debug_font_color.py)",
+      "Bash(git add modules/template_generator.py)"
     ]
   }
 }

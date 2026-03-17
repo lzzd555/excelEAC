@@ -716,11 +716,16 @@ def _find_by_index(sheet_name: str, alias_to_info: Dict, external_links: Optiona
 
 def _build_reference(info: Dict, adjusted_ref: str, output_file_path: Optional[str]) -> str:
     """构建引用字符串"""
-    file_path = info['file_path']
+    file_path = info.get('file_path', '')
     actual_sheet_name = info['sheet_name']
 
+    # 检查是否为内部引用（数据源sheet已复制到输出文件）
+    is_internal = info.get('is_internal', False)
+
+    # 检查是否为本地引用
     is_local = (
-        (output_file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
+        is_internal or
+        (output_file_path and file_path and os.path.normpath(file_path) == os.path.normpath(output_file_path)) or
         info.get('is_template_self_reference', False)
     )
 
@@ -905,7 +910,7 @@ def generate_excel_from_template(
     data_sources: List[Dict],
     output_file: str,
     string_columns: Optional[List[str]] = None,
-    use_external_refs: bool = True,
+    use_external_refs: bool = False,
     primary_column: Optional[str] = None
 ) -> pd.DataFrame:
     """
@@ -919,6 +924,8 @@ def generate_excel_from_template(
         output_file: 输出文件路径
         string_columns: 字符串列列表
         use_external_refs: 是否使用外部引用公式
+            - False（默认）: 将数据源sheet添加到输出文件，公式直接引用sheet名
+            - True: 公式使用外部文件引用，不复制数据源sheet
         primary_column: 主键列名，为空时跳过过滤
 
     Returns:
@@ -953,7 +960,7 @@ def generate_excel_from_template(
     _generate_output_file(
         output_file, merged_df, template_columns, template_formulas,
         formula_columns, alias_to_info, external_links, template_ws,
-        use_external_refs, string_columns
+        use_external_refs, string_columns, data_sources
     )
 
     # 7. 打印公式汇总
@@ -1108,14 +1115,15 @@ def _generate_output_file(output_file: str, merged_df: pd.DataFrame,
                           template_columns: List[str], template_formulas: Dict,
                           formula_columns: List[str], alias_to_info: Dict,
                           external_links: Dict, template_ws,
-                          use_external_refs: bool, string_columns: Optional[List[str]]) -> None:
+                          use_external_refs: bool, string_columns: Optional[List[str]],
+                          data_sources: Optional[List[Dict]] = None) -> None:
     """生成输出文件"""
     print("5. 生成输出文件...")
 
     if use_external_refs:
-        print("   模式: 外部引用公式（需Excel打开）")
+        print("   模式: 外部引用公式（数据源保留在外部文件）")
     else:
-        print("   模式: 直接写入数据值")
+        print("   模式: 内部引用公式（数据源sheet将复制到输出文件）")
 
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         output_df = merged_df.copy()
@@ -1127,6 +1135,10 @@ def _generate_output_file(output_file: str, merged_df: pd.DataFrame,
 
         output_df.to_excel(writer, sheet_name='结果', index=False)
         ws = writer.sheets['结果']
+
+        # 如果不使用外部引用，复制数据源sheet到输出文件
+        if not use_external_refs and data_sources:
+            _copy_data_source_sheets(writer, data_sources, alias_to_info)
 
         # 应用公式
         _apply_formulas(
@@ -1144,79 +1156,158 @@ def _generate_output_file(output_file: str, merged_df: pd.DataFrame,
     print(f"\n输出文件已保存: {output_file}")
 
 
+def _copy_data_source_sheets(writer, data_sources: List[Dict], alias_to_info: Dict) -> None:
+    """
+    将数据源sheet复制到输出文件
+
+    Args:
+        writer: ExcelWriter对象
+        data_sources: 数据源列表
+        alias_to_info: 别名到信息的映射
+    """
+    print("   正在复制数据源sheet到输出文件...")
+
+    copied_sheets = set()  # 跟踪已复制的sheet，避免重复
+
+    for idx, ds in enumerate(data_sources, start=1):
+        file_path = ds['file_path']
+        sheet_name = ds['sheet_name']
+        alias = ds.get('alias', '')
+
+        # 确定目标sheet名称
+        if alias:
+            target_sheet_name = alias
+        else:
+            target_sheet_name = sheet_name
+
+        # 避免sheet名冲突
+        if target_sheet_name in copied_sheets or target_sheet_name == '结果':
+            target_sheet_name = f"{target_sheet_name}_{idx}"
+
+        # 读取数据源文件
+        try:
+            source_wb = openpyxl.load_workbook(file_path, data_only=False)
+            if sheet_name not in source_wb.sheetnames:
+                print(f"   警告: 数据源 {file_path} 中不存在sheet '{sheet_name}'")
+                source_wb.close()
+                continue
+
+            source_ws = source_wb[sheet_name]
+
+            # 创建新sheet
+            target_ws = writer.book.create_sheet(title=target_sheet_name)
+
+            # 复制所有单元格数据和样式
+            _copy_worksheet(source_ws, target_ws)
+
+            # 更新alias_to_info，使其指向内部的sheet
+            info_update = {
+                'file_path': '',  # 空路径表示内部引用
+                'sheet_name': target_sheet_name,
+                'is_internal': True
+            }
+
+            # 更新所有相关映射
+            alias_to_info[str(idx)]['is_internal'] = True
+            alias_to_info[str(idx)]['sheet_name'] = target_sheet_name
+            alias_to_info[str(idx)]['file_path'] = ''
+
+            if alias:
+                if alias.lower() in alias_to_info:
+                    alias_to_info[alias.lower()]['is_internal'] = True
+                    alias_to_info[alias.lower()]['sheet_name'] = target_sheet_name
+                    alias_to_info[alias.lower()]['file_path'] = ''
+
+            if sheet_name.lower() in alias_to_info:
+                alias_to_info[sheet_name.lower()]['is_internal'] = True
+                alias_to_info[sheet_name.lower()]['sheet_name'] = target_sheet_name
+                alias_to_info[sheet_name.lower()]['file_path'] = ''
+
+            copied_sheets.add(target_sheet_name)
+            print(f"   已复制: {os.path.basename(file_path)}[{sheet_name}] -> [{target_sheet_name}]")
+
+            source_wb.close()
+        except Exception as e:
+            print(f"   警告: 无法复制数据源sheet '{sheet_name}': {e}")
+
+
+def _copy_worksheet(source_ws, target_ws) -> None:
+    """
+    复制工作表的所有内容（数据和样式）
+
+    Args:
+        source_ws: 源工作表
+        target_ws: 目标工作表
+    """
+    # 复制单元格数据和样式
+    for row in source_ws.iter_rows():
+        for cell in row:
+            new_cell = target_ws.cell(row=cell.row, column=cell.column, value=cell.value)
+            if cell.has_style:
+                copy_cell_style(cell, new_cell)
+
+    # 复制合并单元格
+    for merged_range in source_ws.merged_cells.ranges:
+        target_ws.merge_cells(str(merged_range))
+
+    # 复制列宽
+    for col_letter, col_dim in source_ws.column_dimensions.items():
+        if col_dim.width:
+            target_ws.column_dimensions[col_letter].width = col_dim.width
+
+    # 复制行高
+    for row_idx, row_dim in source_ws.row_dimensions.items():
+        if row_dim.height:
+            target_ws.row_dimensions[row_idx].height = row_dim.height
+
+
 def _prepare_output_df(output_df: pd.DataFrame, template_formulas: Dict,
                         formula_columns: List[str], use_external_refs: bool) -> List[str]:
-    """准备输出DataFrame"""
-    external_ref_pattern = r"(sheet\d+!|\[[^\]]+\][^!'\s]+!|'\[[^\]]+\][^']+'\!)"
+    """
+    准备输出DataFrame
 
-    if use_external_refs:
-        # 外部引用模式：清空公式列
-        for col in formula_columns:
-            if col in output_df.columns:
-                output_df[col] = None
-        return []
+    Args:
+        output_df: 输出DataFrame
+        template_formulas: 模板公式字典
+        formula_columns: 公式列列表
+        use_external_refs: 是否使用外部引用
 
-    # 直接数据模式：区分外部引用和本地公式
-    external_ref_columns = []
-    local_formula_columns = []
+    Returns:
+        List[str]: 需要应用公式的列名列表
+    """
+    # 收集所有需要应用公式的列
+    applicable_formula_columns = []
 
     for col in formula_columns:
         if col in template_formulas:
-            formula = template_formulas[col]
-            if re.search(external_ref_pattern, formula, re.IGNORECASE):
-                external_ref_columns.append(col)
-            else:
-                local_formula_columns.append(col)
+            applicable_formula_columns.append(col)
+            # 清空公式列，为后续写入公式做准备
+            if col in output_df.columns:
+                output_df[col] = None
 
-    # 清空本地公式列
-    for col in local_formula_columns:
-        if col in output_df.columns:
-            output_df[col] = None
+    print(f"   公式列: {applicable_formula_columns}")
 
-    print(f"   数据值列: {external_ref_columns}")
-    print(f"   本地公式列: {local_formula_columns}")
-
-    return local_formula_columns
+    return applicable_formula_columns
 
 
 def _apply_formulas(ws, output_df: pd.DataFrame, template_formulas: Dict,
                     formula_columns: List[str], alias_to_info: Dict,
                     output_file: str, external_links: Dict,
-                    use_external_refs: bool, local_formula_columns: List[str]) -> None:
-    """应用公式到工作表"""
-    if not formula_columns or not template_formulas:
+                    use_external_refs: bool, formula_columns_to_apply: List[str]) -> None:
+    """
+    应用公式到工作表
+
+    公式引用格式由 alias_to_info 中的 is_internal 标志决定：
+    - is_internal=True: 内部引用（SheetName!A1）
+    - is_internal=False: 外部引用（[filename]SheetName!A1）
+    """
+    if not formula_columns_to_apply or not template_formulas:
         return
 
-    if use_external_refs:
-        apply_formulas_to_output(
-            ws, formula_columns, template_formulas, alias_to_info,
-            start_row=2, output_file_path=output_file, external_links=external_links
-        )
-    else:
-        _apply_local_formulas(ws, output_df, template_formulas,
-                              local_formula_columns, alias_to_info, output_file, external_links)
-
-
-def _apply_local_formulas(ws, output_df: pd.DataFrame, template_formulas: Dict,
-                          local_formula_columns: List[str], alias_to_info: Dict,
-                          output_file: str, external_links: Dict) -> None:
-    """应用本地公式"""
-    for col in local_formula_columns:
-        if col not in template_formulas:
-            continue
-
-        formula = template_formulas[col]
-        col_idx = _find_column_index(output_df, col)
-
-        if col_idx:
-            for row_idx in range(2, ws.max_row + 1):
-                row_offset = row_idx - 2
-                adjusted_formula = replace_sheet_references(
-                    formula, alias_to_info, row_offset, output_file, external_links
-                )
-                ws.cell(row=row_idx, column=col_idx).value = adjusted_formula
-
-            print(f"   已应用公式: {col} = {formula}")
+    apply_formulas_to_output(
+        ws, formula_columns_to_apply, template_formulas, alias_to_info,
+        start_row=2, output_file_path=output_file, external_links=external_links
+    )
 
 
 def _find_column_index(df: pd.DataFrame, col_name: str) -> Optional[int]:
