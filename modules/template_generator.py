@@ -317,9 +317,8 @@ def read_external_links(xlsx_file: str) -> Dict[int, str]:
     links = {}
 
     try:
-        wb = openpyxl.load_workbook(xlsx_file, data_only=False)
-        links = _extract_external_links(wb)
-        wb.close()
+        with openpyxl.load_workbook(xlsx_file, data_only=False) as wb:
+            links = _extract_external_links(wb)
     except Exception as e:
         print(f"   警告: 无法读取外部链接: {e}")
 
@@ -370,7 +369,7 @@ def _parse_single_link(link) -> Optional[Dict[int, str]]:
 def read_template_structure(
     template_file: str,
     template_sheet: str
-) -> Tuple[List[str], Dict[str, str], openpyxl.worksheet.worksheet.Worksheet]:
+) -> Tuple[List[str], Dict[str, str], openpyxl.worksheet.worksheet.Worksheet, openpyxl.Workbook]:
     """
     读取模板的结构信息
 
@@ -379,27 +378,31 @@ def read_template_structure(
         template_sheet: 模板sheet名称
 
     Returns:
-        Tuple: (列名列表, 公式模板字典, 模板工作表对象)
+        Tuple: (列名列表, 公式模板字典, 模板工作表对象, 工作簿对象)
+               注意：调用者需要负责关闭返回的工作簿对象
     """
     wb = openpyxl.load_workbook(template_file, data_only=False)
 
-    if template_sheet not in wb.sheetnames:
+    try:
+        if template_sheet not in wb.sheetnames:
+            raise ValueError(f"模板中不存在工作表: {template_sheet}")
+
+        ws = wb[template_sheet]
+
+        # 读取第一行作为列名
+        columns = _read_template_columns(ws)
+
+        # 读取第二行的公式（作为公式模板）
+        formula_templates = _read_formula_templates(ws, columns)
+
+        print(f"正在读取模板: {os.path.basename(template_file)} 的 {template_sheet} 工作表...")
+        print(f"模板列名: {columns}")
+        print(f"公式列: {[k for k, v in formula_templates.items() if v]}")
+
+        return columns, formula_templates, ws, wb
+    except Exception:
         wb.close()
-        raise ValueError(f"模板中不存在工作表: {template_sheet}")
-
-    ws = wb[template_sheet]
-
-    # 读取第一行作为列名
-    columns = _read_template_columns(ws)
-
-    # 读取第二行的公式（作为公式模板）
-    formula_templates = _read_formula_templates(ws, columns)
-
-    print(f"正在读取模板: {os.path.basename(template_file)} 的 {template_sheet} 工作表...")
-    print(f"模板列名: {columns}")
-    print(f"公式列: {[k for k, v in formula_templates.items() if v]}")
-
-    return columns, formula_templates, ws
+        raise
 
 
 def _read_template_columns(ws) -> List[str]:
@@ -941,7 +944,7 @@ def generate_excel_from_template(
     _validate_input_files(template_file, data_sources)
 
     # 2. 分析模板
-    external_links, template_formulas, template_columns, template_ws = _analyze_template(
+    external_links, template_formulas, template_columns, template_ws, template_wb = _analyze_template(
         template_file, template_sheet, formula_columns
     )
 
@@ -967,7 +970,7 @@ def generate_excel_from_template(
     _print_formula_summary(output_file)
 
     # 关闭模板工作簿
-    template_ws.parent.close()
+    template_wb.close()
 
     return merged_df
 
@@ -992,7 +995,7 @@ def _analyze_template(template_file: str, template_sheet: str,
     print("2. 分析模板...")
 
     external_links = read_external_links(template_file)
-    template_columns, formula_templates, template_ws = read_template_structure(
+    template_columns, formula_templates, template_ws, template_wb = read_template_structure(
         template_file, template_sheet
     )
 
@@ -1005,7 +1008,7 @@ def _analyze_template(template_file: str, template_sheet: str,
             print(f"   警告: 公式列 '{col_name}' 在模板中没有公式")
 
     print()
-    return external_links, template_formulas, template_columns, template_ws
+    return external_links, template_formulas, template_columns, template_ws, template_wb
 
 
 def _load_all_data_sources(data_sources: List[Dict], output_file: str,
