@@ -581,10 +581,11 @@ def parse_formula_references(formula: str) -> List[Tuple[str, str, int]]:
 # ==================== Sheet引用替换函数 ====================
 
 # 正则模式常量
-_QUOTED_PATTERN = r"'([^']+)'!([A-Z]+\d*(?::[A-Z]*\d*)?)"
-_BRACKET_PATTERN = r"(\[[^\]]+\][^!'\s]+)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
-_UNQUOTED_PATTERN = r"([A-Za-z_][A-Za-z0-9_]*)!([A-Z]+\d*(?::[A-Z]*\d*)?)"
-_LOCAL_PATTERN = r"(?<![A-Za-z!'\"\\])([A-Z]+)(\d+)(?![A-Za-z])"
+# 注意: 添加 \$? 来支持绝对引用（如 $A$1, $D:$D 等）
+_QUOTED_PATTERN = r"'([^']+)'!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
+_BRACKET_PATTERN = r"(\[[^\]]+\][^!'\s]+)!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
+_UNQUOTED_PATTERN = r"([A-Za-z_][A-Za-z0-9_]*)!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
+_LOCAL_PATTERN = r"(?<![A-Za-z!'\"\\])(\$?[A-Z]+)(\$?\d+)(?![A-Za-z])"
 
 
 def replace_sheet_references(
