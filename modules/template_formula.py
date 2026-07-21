@@ -97,3 +97,80 @@ def resolve_formula_sheet(
             }
 
     raise ValueError(f"公式引用 sheet '{actual}':映射/数据文件/模板中均未找到;可用 sheet_mapping 指定")
+
+
+_REF_SHEET_PATTERN = re.compile(r"(?:'([^']+)'!|(?:\[[^\]]+\])?([A-Za-z_][A-Za-z0-9_]*)!)")
+
+
+def _collect_referenced_sheets(formulas) -> List[str]:
+    """从一批公式里收集所有被引用的 sheet 名(去重)。"""
+    names = []
+    seen = set()
+    for f in formulas.values():
+        for m in _REF_SHEET_PATTERN.finditer(f or ''):
+            name = m.group(1) or m.group(2)
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                names.append(name)
+    return names
+
+
+def _sheet_row_count(file_path: str, sheet: str) -> int:
+    wb = openpyxl.load_workbook(file_path, read_only=True)
+    try:
+        ws = wb[sheet]
+        return ws.max_row
+    finally:
+        wb.close()
+
+
+def resolve_row_source(
+    row_source: Optional[Tuple[str, str]],
+    formulas: Dict[str, str],
+    file_sheet_index: Dict[str, List[str]],
+    data_files: Optional[List[str]] = None,
+) -> Tuple[int, str]:
+    """
+    决定输出公式列的行数 N,返回 (N, 说明)。
+    1) row_source 显式 → 用 (文件, sheet) 的行数
+    2) 否则 → 公式中被引用次数最多的数据 sheet
+    3) 再否则 → 第一个数据文件的第一个 sheet
+    """
+    if data_files is None:
+        data_files = list(file_sheet_index.keys())
+
+    # ① 显式
+    if row_source:
+        f, s = row_source
+        f = _match_data_file(f, data_files)
+        if s not in file_sheet_index.get(f, []):
+            raise ValueError(f"row_source 指定的 sheet '{s}' 不在文件 '{f}' 中")
+        return _sheet_row_count(f, s), f"row_source={f}:{s}"
+
+    # ② 统计每个数据 sheet 被引用次数
+    refs = _collect_referenced_sheets(formulas)
+    counts = {}
+    for f in formulas.values():
+        for m in _REF_SHEET_PATTERN.finditer(f or ''):
+            name = (m.group(1) or m.group(2) or '').lower()
+            if name:
+                counts[name] = counts.get(name, 0) + 1
+
+    best = None
+    best_count = 0
+    for name in refs:
+        nl = name.lower()
+        for f, sheets in file_sheet_index.items():
+            for s in sheets:
+                if s.lower() == nl:
+                    c = counts.get(nl, 0)
+                    if c > best_count:
+                        best_count = c
+                        best = (f, s)
+    if best:
+        return _sheet_row_count(*best), f"最常引用={best[0]}:{best[1]}"
+
+    # ③ 兜底:第一个数据文件的第一个 sheet
+    f = data_files[0]
+    s = file_sheet_index[f][0]
+    return _sheet_row_count(f, s), f"兜底={f}:{s}"
