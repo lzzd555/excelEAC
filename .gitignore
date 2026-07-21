@@ -47,3 +47,6 @@ test_output/
 *.tmp
 *.bak
 *.log
+
+# Git worktrees
+.worktrees/
