@@ -7,7 +7,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import openpyxl
-from modules.template_formula import discover_file_sheets
+from modules.template_formula import discover_file_sheets, resolve_formula_sheet
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,6 +28,73 @@ def test_discover_file_sheets_lists_all():
     print("PASS test_discover_file_sheets_lists_all")
 
 
+def _make_data_file(name, sheet):
+    fpath = os.path.join(TEST_DIR, name)
+    wb = openpyxl.Workbook()
+    wb.active.title = sheet
+    wb[sheet].cell(row=1, column=1, value='x')
+    wb.save(fpath); wb.close()
+    return fpath
+
+
+def test_resolve_explicit_mapping_wins():
+    f1 = _make_data_file('_tmp_r1.xlsx', 'Data')
+    f2 = _make_data_file('_tmp_r2.xlsx', 'Data')  # 同名 sheet 在两个文件
+    file_sheet_index = {f1: ['Data'], f2: ['Data']}
+    sheet_mapping = {'Data': f2}  # 显式指向 f2
+    info = resolve_formula_sheet('Data', sheet_mapping, file_sheet_index, [], use_external_refs=False)
+    assert info['file_path'] == f2, info
+    os.remove(f1); os.remove(f2)
+    print("PASS test_resolve_explicit_mapping_wins")
+
+
+def test_resolve_auto_match_single():
+    f1 = _make_data_file('_tmp_a1.xlsx', 'ESDP-Bpart')
+    file_sheet_index = {f1: ['ESDP-Bpart']}
+    info = resolve_formula_sheet('ESDP-Bpart', None, file_sheet_index, [], use_external_refs=False)
+    assert info['file_path'] == f1 and info['is_internal'] is True, info
+    os.remove(f1)
+    print("PASS test_resolve_auto_match_single")
+
+
+def test_resolve_conflict_without_mapping_raises():
+    f1 = _make_data_file('_tmp_c1.xlsx', 'Data')
+    f2 = _make_data_file('_tmp_c2.xlsx', 'Data')
+    file_sheet_index = {f1: ['Data'], f2: ['Data']}
+    try:
+        resolve_formula_sheet('Data', None, file_sheet_index, [], use_external_refs=False)
+        assert False, "应抛错"
+    except ValueError as e:
+        assert 'Data' in str(e)
+    os.remove(f1); os.remove(f2)
+    print("PASS test_resolve_conflict_without_mapping_raises")
+
+
+def test_resolve_template_self_sheet():
+    f1 = _make_data_file('_tmp_t1.xlsx', 'Other')
+    file_sheet_index = {f1: ['Other']}
+    info = resolve_formula_sheet('配置表', None, file_sheet_index, ['配置表', '结果'], use_external_refs=False)
+    assert info.get('is_template_self_reference') is True, info
+    os.remove(f1)
+    print("PASS test_resolve_template_self_sheet")
+
+
+def test_resolve_not_found_raises():
+    f1 = _make_data_file('_tmp_n1.xlsx', 'Other')
+    try:
+        resolve_formula_sheet('Missing', None, {f1: ['Other']}, ['配置表'], use_external_refs=False)
+        assert False, "应抛错"
+    except ValueError as e:
+        assert 'Missing' in str(e)
+    os.remove(f1)
+    print("PASS test_resolve_not_found_raises")
+
+
 if __name__ == '__main__':
     test_discover_file_sheets_lists_all()
+    test_resolve_explicit_mapping_wins()
+    test_resolve_auto_match_single()
+    test_resolve_conflict_without_mapping_raises()
+    test_resolve_template_self_sheet()
+    test_resolve_not_found_raises()
     print("all pass")
