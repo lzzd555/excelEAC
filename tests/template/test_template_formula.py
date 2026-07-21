@@ -7,7 +7,12 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import openpyxl
-from modules.template_formula import discover_file_sheets, resolve_formula_sheet, resolve_row_source
+from modules.template_formula import (
+    discover_file_sheets,
+    resolve_formula_sheet,
+    resolve_row_source,
+    generate_formulas_from_template,
+)
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -126,6 +131,52 @@ def test_row_source_fallback_first_file():
     print("PASS test_row_source_fallback_first_file")
 
 
+def _build_formula_fixture():
+    """模板 1 个公式列,引用 1 个外部数据 sheet。"""
+    template = os.path.join(TEST_DIR, '_tmp_tpl.xlsx')
+    data = os.path.join(TEST_DIR, '_tmp_data.xlsx')
+    out = os.path.join(TEST_DIR, '_tmp_out.xlsx')
+
+    # 模板:第1行表头 [合计],第2行公式 =Src!B2
+    wb = openpyxl.Workbook(); wb.active.title = '结果'
+    ws = wb['结果']
+    ws.cell(row=1, column=1, value='合计')
+    ws.cell(row=2, column=1, value='=Src!B2')
+    wb.save(template); wb.close()
+
+    # 数据:Src sheet,3 行
+    wb = openpyxl.Workbook(); wb.active.title = 'Src'
+    wb['Src'].cell(row=1, column=2, value='h')
+    for i in range(3):
+        wb['Src'].cell(row=i + 2, column=2, value=i + 1)
+    wb.save(data); wb.close()
+    return template, data, out
+
+
+def test_generate_internal_happy_path():
+    template, data, out = _build_formula_fixture()
+    df = generate_formulas_from_template(
+        template_file=template, template_sheet='结果',
+        data_files=[data], output_file=out,
+    )
+    # 返回骨架:只含公式列
+    assert list(df.columns) == ['合计'], df.columns
+
+    # 读回输出文件,核对公式与行数
+    wb = openpyxl.load_workbook(out)
+    ws = wb['结果']
+    assert ws.cell(row=1, column=1).value == '合计'
+    # 内部模式:数据 sheet 被复制进来
+    assert 'Src' in wb.sheetnames, wb.sheetnames
+    # 第 2 行公式应为 =Src!B2(内部引用,行偏移 0)
+    assert ws.cell(row=2, column=1).value == '=Src!B2', ws.cell(row=2, column=1).value
+    wb.close()
+
+    for p in (template, data, out):
+        os.remove(p)
+    print("PASS test_generate_internal_happy_path")
+
+
 if __name__ == '__main__':
     test_discover_file_sheets_lists_all()
     test_resolve_explicit_mapping_wins()
@@ -136,4 +187,5 @@ if __name__ == '__main__':
     test_row_source_explicit()
     test_row_source_most_referenced()
     test_row_source_fallback_first_file()
+    test_generate_internal_happy_path()
     print("all pass")
