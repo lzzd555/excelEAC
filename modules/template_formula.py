@@ -93,13 +93,14 @@ def resolve_formula_sheet(
             return {
                 'file_path': '',
                 'sheet_name': s,
-                'is_template_self_reference': True,
+                'is_template_sheet': True,
             }
 
     raise ValueError(f"公式引用 sheet '{actual}':映射/数据文件/模板中均未找到;可用 sheet_mapping 指定")
 
 
-_REF_SHEET_PATTERN = re.compile(r"(?:'([^']+)'!|(?:\[[^\]]+\])?([A-Za-z_][A-Za-z0-9_]*)!)")
+# 支持 ASCII 与中日韩(CJK)等非 ASCII 字母作为 sheet 名(Excel 不会给中文表名加引号)
+_REF_SHEET_PATTERN = re.compile(r"(?:'([^']+)'!|(?:\[[^\]]+\])?([A-Za-z_一-鿿][A-Za-z0-9_一-鿿]*)!)")
 
 
 def _collect_referenced_sheets(formulas) -> List[str]:
@@ -262,14 +263,23 @@ def generate_formulas_from_template(
 
         # 4. 三层解析公式引用的每个 sheet
         referenced = _collect_referenced_sheets(formula_templates)
-        alias_to_info: Dict[str, Dict] = {
-            # 模板自引用(template_sheet 引用自己)→ 指向输出 '结果'
-            template_sheet.lower(): {'file_path': output_file, 'sheet_name': '结果', 'is_template_self_reference': True},
-        }
+        alias_to_info: Dict[str, Dict] = {}
         referenced_infos = []
         for s in referenced:
-            info = resolve_formula_sheet(s, sheet_mapping, file_sheet_index, template_sheets, use_external_refs)
-            alias_to_info[s.lower()] = info
+            sl = s.lower()
+            if sl == template_sheet.lower():
+                # 自引用:模板目标 sheet 引用自己 → 指向输出 '结果',无需复制
+                info = {'file_path': output_file, 'sheet_name': '结果', 'is_template_self_reference': True}
+            else:
+                info = resolve_formula_sheet(s, sheet_mapping, file_sheet_index, template_sheets, use_external_refs)
+                # resolve 第③层命中模板里的兄弟 sheet → 内部模式需从模板复制进输出
+                if info.get('is_template_sheet'):
+                    info = {
+                        'file_path': template_file,
+                        'sheet_name': info['sheet_name'],
+                        'is_internal': not use_external_refs,
+                    }
+            alias_to_info[sl] = info
             referenced_infos.append(info)
 
         # 5. 行数

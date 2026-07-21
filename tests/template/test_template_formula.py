@@ -79,7 +79,7 @@ def test_resolve_template_self_sheet():
     f1 = _make_data_file('_tmp_t1.xlsx', 'Other')
     file_sheet_index = {f1: ['Other']}
     info = resolve_formula_sheet('配置表', None, file_sheet_index, ['配置表', '结果'], use_external_refs=False)
-    assert info.get('is_template_self_reference') is True, info
+    assert info.get('is_template_sheet') is True, info
     os.remove(f1)
     print("PASS test_resolve_template_self_sheet")
 
@@ -275,6 +275,57 @@ def test_generate_multi_formula_columns_row_offset():
     print("PASS test_generate_multi_formula_columns_row_offset")
 
 
+def test_generate_template_sibling_sheet_copied():
+    # 公式引用模板自带的兄弟 sheet '配置表',内部模式应把它复制进输出
+    template = os.path.join(TEST_DIR, '_tmp_tpl_sib.xlsx')
+    data = os.path.join(TEST_DIR, '_tmp_data_sib.xlsx')
+    out = os.path.join(TEST_DIR, '_tmp_out_sib.xlsx')
+    wb = openpyxl.Workbook(); wb.active.title = '结果'
+    wb['结果'].cell(row=1, column=1, value='取值')
+    wb['结果'].cell(row=2, column=1, value='=配置表!B2')
+    cfg = wb.create_sheet('配置表')
+    cfg.cell(row=1, column=2, value='h')
+    cfg.cell(row=2, column=2, value=42)
+    wb.save(template); wb.close()
+    wb = openpyxl.Workbook(); wb.active.title = 'Src'
+    wb['Src'].cell(row=2, column=1, value=1); wb.save(data); wb.close()
+
+    generate_formulas_from_template(
+        template_file=template, template_sheet='结果',
+        data_files=[data], output_file=out,
+    )
+    wb = openpyxl.load_workbook(out)
+    assert '配置表' in wb.sheetnames, f"兄弟 sheet 应被复制进输出: {wb.sheetnames}"
+    assert wb['配置表'].cell(row=2, column=2).value == 42
+    assert wb['结果'].cell(row=2, column=1).value == '=配置表!B2', wb['结果'].cell(row=2, column=1).value
+    wb.close()
+    os.remove(template); os.remove(data); os.remove(out)
+    print("PASS test_generate_template_sibling_sheet_copied")
+
+
+def test_generate_self_reference_maps_to_output_sheet():
+    # template_sheet 名为 '分析'(≠ 输出名 '结果'),自引用应映射到 '结果'
+    template = os.path.join(TEST_DIR, '_tmp_tpl_self.xlsx')
+    data = os.path.join(TEST_DIR, '_tmp_data_self.xlsx')
+    out = os.path.join(TEST_DIR, '_tmp_out_self.xlsx')
+    wb = openpyxl.Workbook(); wb.active.title = '分析'
+    wb['分析'].cell(row=1, column=1, value='自引')
+    wb['分析'].cell(row=2, column=1, value='=分析!A1')  # 引用自身 sheet
+    wb.save(template); wb.close()
+    wb = openpyxl.Workbook(); wb.active.title = 'Src'
+    wb['Src'].cell(row=2, column=1, value=1); wb.save(data); wb.close()
+
+    generate_formulas_from_template(
+        template_file=template, template_sheet='分析',
+        data_files=[data], output_file=out,
+    )
+    wb = openpyxl.load_workbook(out)
+    assert wb['结果'].cell(row=2, column=1).value == '=结果!A1', wb['结果'].cell(row=2, column=1).value
+    wb.close()
+    os.remove(template); os.remove(data); os.remove(out)
+    print("PASS test_generate_self_reference_maps_to_output_sheet")
+
+
 if __name__ == '__main__':
     test_discover_file_sheets_lists_all()
     test_resolve_explicit_mapping_wins()
@@ -290,4 +341,6 @@ if __name__ == '__main__':
     test_generate_sheet_mapping_override()
     test_generate_conflict_raises()
     test_generate_multi_formula_columns_row_offset()
+    test_generate_template_sibling_sheet_copied()
+    test_generate_self_reference_maps_to_output_sheet()
     print("all pass")

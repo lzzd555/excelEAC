@@ -474,9 +474,10 @@ def parse_formula_references(formula: str) -> List[Tuple[str, str, int]]:
 
 # 正则模式常量
 # 注意: 添加 \$? 来支持绝对引用（如 $A$1, $D:$D 等）
+# 注意: CJK 范围 一-鿿 支持中文等非 ASCII 表名(Excel 不给中文加引号)
 _QUOTED_PATTERN = r"'([^']+)'!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
 _BRACKET_PATTERN = r"(\[[^\]]+\][^!'\s]+)!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
-_UNQUOTED_PATTERN = r"([A-Za-z_][A-Za-z0-9_]*)!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
+_UNQUOTED_PATTERN = r"([A-Za-z_一-鿿][A-Za-z0-9_一-鿿]*)!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
 _LOCAL_PATTERN = r"(?<![A-Za-z!'\"\\])(\$?[A-Z]+)(\$?\d+)(?![A-Za-z])"
 
 
