@@ -100,7 +100,7 @@ def resolve_formula_sheet(
 
 
 # 支持 ASCII 与中日韩(CJK)等非 ASCII 字母作为 sheet 名(Excel 不会给中文表名加引号)
-_REF_SHEET_PATTERN = re.compile(r"(?:'([^']+)'!|(?:\[[^\]]+\])?([A-Za-z_一-鿿][A-Za-z0-9_一-鿿]*)!)")
+_REF_SHEET_PATTERN = re.compile(r"(?:'([^']+)'!|(?:\[[^\]]+\])?([A-Za-z_一-鿿][A-Za-z0-9_.一-鿿]*)!)")
 
 
 def _collect_referenced_sheets(formulas) -> List[str]:
@@ -185,12 +185,61 @@ def _validate_files(template_file: str, data_files: List[str]) -> None:
             raise FileNotFoundError(f"数据文件不存在: {f}")
 
 
-def _copy_referenced_external_sheets(writer, referenced_infos: List[Dict]) -> None:
-    """内部模式:把被引用的外部/模板 sheet 复制进输出文件(去重)。"""
+_BRACKET_SHEET_RE = re.compile(
+    r"'?\[(\d+)\]([^'!]+)'?!"
+)
+
+
+def _rewrite_bracket_refs_in_sheet(ws, sheet_name_map: Dict[str, str]) -> None:
+    """将工作表中 [N]SheetName! 形式的外部链接引用重写为本地 SheetName!。
+
+    sheet_name_map: {原始sheet名(小写): 输出中的sheet名}
+    仅当 SheetName 在映射中存在时才重写,否则保持原样。
+    """
+    for row in ws.iter_rows():
+        for cell in row:
+            if not isinstance(cell.value, str) or not cell.value.startswith('='):
+                continue
+            if '[' not in cell.value:
+                continue
+
+            def _replacer(m):
+                sheet_name = m.group(2).strip("'")
+                target = sheet_name_map.get(sheet_name.lower())
+                if target is None:
+                    return m.group(0)
+                if any(c in target for c in " -()&^%$#@!~`'\"\\."):
+                    return f"'{target}'!"
+                return f"{target}!"
+
+            cell.value = _BRACKET_SHEET_RE.sub(_replacer, cell.value)
+
+
+def _build_sheet_name_map(alias_to_info: Dict[str, Dict], output_sheet_name: str, template_sheet: str) -> Dict[str, str]:
+    """从 alias_to_info 构建 {原始sheet名(小写): 输出中的sheet名} 映射。
+
+    用于将复制进输出的数据 sheet 中的 [N]SheetName! 外部链接
+    重写为输出文件中实际存在的本地 sheet 引用。
+    同时加入模板目标sheet自身的映射(如 Master -> 结果)。
+    """
+    name_map: Dict[str, str] = {}
+    for key, info in alias_to_info.items():
+        target_name = info.get('sheet_name', '')
+        if info.get('is_template_self_reference'):
+            target_name = output_sheet_name
+        if target_name:
+            name_map[key] = target_name
+    if template_sheet.lower() not in name_map:
+        name_map[template_sheet.lower()] = output_sheet_name
+    return name_map
+
+
+def _copy_referenced_external_sheets(writer, referenced_infos: List[Dict], sheet_name_map: Dict[str, str]) -> None:
+    """内部模式:把被引用的外部/模板 sheet 复制进输出文件(去重),并重写外部链接引用。"""
     copied = set()
     for info in referenced_infos:
         if info.get('is_template_self_reference'):
-            continue  # 模板自引用指向输出自身,无需复制
+            continue
         src_file = info['file_path']
         src_sheet = info['sheet_name']
         key = (src_file, src_sheet)
@@ -206,6 +255,9 @@ def _copy_referenced_external_sheets(writer, referenced_infos: List[Dict]) -> No
             copied.add(key)
         finally:
             src_wb.close()
+
+    for ws in writer.book.worksheets:
+        _rewrite_bracket_refs_in_sheet(ws, sheet_name_map)
 
 
 def _apply_formula_column_styles(ws, template_ws, formula_columns: List[str],
@@ -296,7 +348,8 @@ def generate_formulas_from_template(
 
             # 内部模式:复制被引用的外部 sheet
             if not use_external_refs:
-                _copy_referenced_external_sheets(writer, referenced_infos)
+                sheet_name_map = _build_sheet_name_map(alias_to_info, '结果', template_sheet)
+                _copy_referenced_external_sheets(writer, referenced_infos, sheet_name_map)
 
             # 逐行写公式(行偏移 = 当前行 - 2)
             col_to_idx = {name: i + 1 for i, name in enumerate(output_df.columns)}

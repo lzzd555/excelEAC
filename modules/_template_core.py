@@ -391,11 +391,19 @@ def read_template_structure(
 
 
 def _read_template_columns(ws) -> List[str]:
-    """读取模板列名"""
+    """读取模板列名，同名列自动添加后缀 _2, _3 ..."""
+    seen: Dict[str, int] = {}
     columns = []
     for cell in ws[1]:
         if cell.value:
-            columns.append(str(cell.value))
+            name = str(cell.value)
+            count = seen.get(name, 0)
+            seen[name] = count + 1
+            if count > 0:
+                name = f"{name}_{count + 1}"
+            columns.append(name)
+        else:
+            columns.append(f"Col_{len(columns) + 1}")
     return columns
 
 
@@ -477,7 +485,7 @@ def parse_formula_references(formula: str) -> List[Tuple[str, str, int]]:
 # 注意: CJK 范围 一-鿿 支持中文等非 ASCII 表名(Excel 不给中文加引号)
 _QUOTED_PATTERN = r"'([^']+)'!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
 _BRACKET_PATTERN = r"(\[[^\]]+\][^!'\s]+)!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
-_UNQUOTED_PATTERN = r"([A-Za-z_一-鿿][A-Za-z0-9_一-鿿]*)!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
+_UNQUOTED_PATTERN = r"([A-Za-z_一-鿿][A-Za-z0-9_.一-鿿]*)!(\$?[A-Z]+\$?\d*(?::\$?[A-Z]*\$?\d*)?)"
 _LOCAL_PATTERN = r"(?<![A-Za-z!'\"\\])(\$?[A-Z]+)(\$?\d+)(?![A-Za-z])"
 
 
@@ -507,8 +515,15 @@ def replace_sheet_references(
                     result, flags=re.IGNORECASE)
 
     # 调整本地单元格引用的行号
+    def _adjust_local_ref(m, offset):
+        col_part = m.group(1)
+        row_part = m.group(2)
+        if row_part.startswith('$'):
+            return f"{col_part}{row_part}"
+        return f"{col_part}{int(row_part) + offset}"
+
     result = re.sub(_LOCAL_PATTERN,
-                    lambda m: f"{m.group(1)}{int(m.group(2)) + row_offset}",
+                    lambda m: _adjust_local_ref(m, row_offset),
                     result)
 
     return result
@@ -522,29 +537,26 @@ def _adjust_cell_ref(cell_ref: str, row_offset: int) -> str:
 
 
 def _adjust_single_ref(cell_ref: str, row_offset: int) -> str:
-    """调整单个单元格引用"""
-    col_match = re.match(r'([A-Z]+)(\d+)', cell_ref)
-    if col_match:
-        col = col_match.group(1)
-        row = int(col_match.group(2)) + row_offset
-        return f"{col}{row}"
+    m = re.match(r'(\$?)([A-Z]+)(\$?)(\d+)', cell_ref)
+    if m:
+        col_dollar, col, row_dollar, row_str = m.group(1), m.group(2), m.group(3), m.group(4)
+        row = int(row_str) if row_dollar == '$' else int(row_str) + row_offset
+        return f"{col_dollar}{col}{row_dollar}{row}"
     return cell_ref
 
 
 def _adjust_range_ref(cell_ref: str, row_offset: int) -> str:
-    """调整范围引用"""
     parts = cell_ref.split(':')
     adjusted_parts = []
     for part in parts:
-        col_match = re.match(r'([A-Z]+)(\d*)', part)
-        if col_match:
-            col = col_match.group(1)
-            row_str = col_match.group(2)
+        m = re.match(r'(\$?)([A-Z]+)(\$?)(\d*)', part)
+        if m:
+            col_dollar, col, row_dollar, row_str = m.group(1), m.group(2), m.group(3), m.group(4)
             if row_str:
-                row = int(row_str) + row_offset
-                adjusted_parts.append(f"{col}{row}")
+                row = int(row_str) if row_dollar == '$' else int(row_str) + row_offset
+                adjusted_parts.append(f"{col_dollar}{col}{row_dollar}{row}")
             else:
-                adjusted_parts.append(col)
+                adjusted_parts.append(f"{col_dollar}{col}")
         else:
             adjusted_parts.append(part)
     return ':'.join(adjusted_parts)
@@ -627,7 +639,7 @@ def _build_reference(info: Dict, adjusted_ref: str, output_file_path: Optional[s
     )
 
     if is_local:
-        if any(c in actual_sheet_name for c in " -()&^%$#@!~`'\"\\"):
+        if any(c in actual_sheet_name for c in " -()&^%$#@!~`'\"\\."):
             return f"'{actual_sheet_name}'!{adjusted_ref}"
         return f"{actual_sheet_name}!{adjusted_ref}"
 
