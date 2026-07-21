@@ -6,26 +6,17 @@ Excel模板生成器模块
 import pandas as pd
 import openpyxl
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protection
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import os
-import re
-import copy
 
 from modules._template_core import (
-    CellStyle,
-    copy_color, _copy_rgb_color, _copy_theme_color, _copy_indexed_color,
-    copy_side, copy_cell_style, _copy_font_style, _get_font_color,
-    _copy_fill_style, _apply_fill_by_type, _apply_solid_fill, _get_fill_color_value,
-    _apply_fallback_fill, _copy_border_style, _copy_alignment_style,
+    copy_cell_style,
     _copy_worksheet,
-    read_external_links, _extract_external_links, _parse_single_link, replace_link_indices_with_filenames,
-    read_template_structure, _read_template_columns, _read_formula_templates,
-    parse_formula_references, replace_sheet_references, _adjust_cell_ref, _adjust_single_ref,
-    _adjust_range_ref, _extract_sheet_name, _find_matching_info, _resolve_multiple_matches,
-    _find_by_index, _build_reference, _replace_quoted_match, _replace_unquoted_match, _replace_bracket_match,
-    _QUOTED_PATTERN, _BRACKET_PATTERN, _UNQUOTED_PATTERN, _LOCAL_PATTERN,
+    read_external_links,
+    read_template_structure,
+    replace_sheet_references,
+    parse_formula_references,
 )
 
 
