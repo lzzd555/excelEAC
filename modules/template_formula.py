@@ -198,6 +198,7 @@ def _copy_referenced_external_sheets(writer, referenced_infos: List[Dict]) -> No
         src_wb = openpyxl.load_workbook(src_file, data_only=False)
         try:
             if src_sheet not in src_wb.sheetnames:
+                print(f"警告: 数据文件 {src_file} 中不存在 sheet '{src_sheet}',跳过复制")
                 continue
             target = writer.book.create_sheet(title=src_sheet)
             _copy_worksheet(src_wb[src_sheet], target)
@@ -248,58 +249,60 @@ def generate_formulas_from_template(
     template_columns, formula_templates, template_ws, template_wb = read_template_structure(
         template_file, template_sheet
     )
-    formula_columns = [c for c in template_columns if formula_templates.get(c)]
-    if not formula_columns:
-        raise ValueError(f"模板 sheet '{template_sheet}' 第 2 行未检测到公式列")
+    try:
+        formula_columns = [c for c in template_columns if formula_templates.get(c)]
+        if not formula_columns:
+            raise ValueError(f"模板 sheet '{template_sheet}' 第 2 行未检测到公式列")
 
-    external_links = read_external_links(template_file)
+        external_links = read_external_links(template_file)
 
-    # 3. 发现数据文件 sheet
-    file_sheet_index = {f: discover_file_sheets(f) for f in data_files}
-    template_sheets = template_wb.sheetnames
+        # 3. 发现数据文件 sheet
+        file_sheet_index = {f: discover_file_sheets(f) for f in data_files}
+        template_sheets = template_wb.sheetnames
 
-    # 4. 三层解析公式引用的每个 sheet
-    referenced = _collect_referenced_sheets(formula_templates)
-    alias_to_info: Dict[str, Dict] = {
-        # 模板自引用(template_sheet 引用自己)→ 指向输出 '结果'
-        template_sheet.lower(): {'file_path': output_file, 'sheet_name': '结果', 'is_template_self_reference': True},
-    }
-    referenced_infos = []
-    for s in referenced:
-        info = resolve_formula_sheet(s, sheet_mapping, file_sheet_index, template_sheets, use_external_refs)
-        alias_to_info[s.lower()] = info
-        referenced_infos.append(info)
+        # 4. 三层解析公式引用的每个 sheet
+        referenced = _collect_referenced_sheets(formula_templates)
+        alias_to_info: Dict[str, Dict] = {
+            # 模板自引用(template_sheet 引用自己)→ 指向输出 '结果'
+            template_sheet.lower(): {'file_path': output_file, 'sheet_name': '结果', 'is_template_self_reference': True},
+        }
+        referenced_infos = []
+        for s in referenced:
+            info = resolve_formula_sheet(s, sheet_mapping, file_sheet_index, template_sheets, use_external_refs)
+            alias_to_info[s.lower()] = info
+            referenced_infos.append(info)
 
-    # 5. 行数
-    n_rows, chosen = resolve_row_source(row_source, formula_templates, file_sheet_index, data_files)
-    print(f"行数驱动: {chosen} → {n_rows} 行")
+        # 5. 行数
+        n_rows, chosen = resolve_row_source(row_source, formula_templates, file_sheet_index, data_files)
+        print(f"行数驱动: {chosen} → {n_rows} 行")
 
-    # 6. 骨架 DataFrame(只含公式列)
-    output_df = pd.DataFrame({c: [None] * n_rows for c in formula_columns})
+        # 6. 骨架 DataFrame(只含公式列)
+        output_df = pd.DataFrame({c: [None] * n_rows for c in formula_columns})
 
-    # 7. 写出
-    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-        output_df.to_excel(writer, sheet_name='结果', index=False)
-        ws = writer.sheets['结果']
+        # 7. 写出
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            output_df.to_excel(writer, sheet_name='结果', index=False)
+            ws = writer.sheets['结果']
 
-        # 内部模式:复制被引用的外部 sheet
-        if not use_external_refs:
-            _copy_referenced_external_sheets(writer, referenced_infos)
+            # 内部模式:复制被引用的外部 sheet
+            if not use_external_refs:
+                _copy_referenced_external_sheets(writer, referenced_infos)
 
-        # 逐行写公式(行偏移 = 当前行 - 2)
-        col_to_idx = {name: i + 1 for i, name in enumerate(output_df.columns)}
-        for col in formula_columns:
-            tmpl = formula_templates[col]
-            for r in range(2, n_rows + 2):
-                formula = replace_sheet_references(
-                    tmpl, alias_to_info, row_offset=r - 2,
-                    output_file_path=output_file, external_links=external_links,
-                )
-                ws.cell(row=r, column=col_to_idx[col], value=formula)
+            # 逐行写公式(行偏移 = 当前行 - 2)
+            col_to_idx = {name: i + 1 for i, name in enumerate(output_df.columns)}
+            for col in formula_columns:
+                tmpl = formula_templates[col]
+                for r in range(2, n_rows + 2):
+                    formula = replace_sheet_references(
+                        tmpl, alias_to_info, row_offset=r - 2,
+                        output_file_path=output_file, external_links=external_links,
+                    )
+                    ws.cell(row=r, column=col_to_idx[col], value=formula)
 
-        # 8. 公式列样式
-        _apply_formula_column_styles(ws, template_ws, formula_columns, col_to_idx, n_rows)
+            # 8. 公式列样式
+            _apply_formula_column_styles(ws, template_ws, formula_columns, col_to_idx, n_rows)
 
-    template_wb.close()
-    print(f"\n输出文件已保存: {output_file}")
-    return output_df
+        print(f"\n输出文件已保存: {output_file}")
+        return output_df
+    finally:
+        template_wb.close()
