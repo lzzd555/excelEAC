@@ -177,6 +177,104 @@ def test_generate_internal_happy_path():
     print("PASS test_generate_internal_happy_path")
 
 
+def test_generate_external_refs_mode():
+    template, data, out = _build_formula_fixture()
+    generate_formulas_from_template(
+        template_file=template, template_sheet='结果',
+        data_files=[data], output_file=out, use_external_refs=True,
+    )
+    wb = openpyxl.load_workbook(out)
+    assert 'Src' not in wb.sheetnames, "外部模式不应复制数据 sheet"
+    formula = wb['结果'].cell(row=2, column=1).value
+    assert formula is not None and ('Src' in formula) and ('!' in formula), formula
+    # 外部引用应含文件名标记
+    assert os.path.basename(data) in formula, formula
+    wb.close()
+    for p in (template, data, out):
+        os.remove(p)
+    print("PASS test_generate_external_refs_mode")
+
+
+def test_generate_sheet_mapping_override():
+    # 两个数据文件都有 Src,靠 sheet_mapping 指定用第二个
+    template, data, out = _build_formula_fixture()
+    data2 = os.path.join(TEST_DIR, '_tmp_data2.xlsx')
+    wb = openpyxl.Workbook(); wb.active.title = 'Src'
+    wb['Src'].cell(row=2, column=2, value=99)
+    wb.save(data2); wb.close()
+
+    generate_formulas_from_template(
+        template_file=template, template_sheet='结果',
+        data_files=[data, data2], output_file=out,
+        sheet_mapping={'Src': data2},
+    )
+    wb = openpyxl.load_workbook(out)
+    # 仅 data2 的 Src 被复制(data 的 Src 被映射跳过,不复制)
+    assert 'Src' in wb.sheetnames
+    assert wb['Src'].cell(row=2, column=2).value == 99
+    wb.close()
+    for p in (template, data, data2, out):
+        os.remove(p)
+    print("PASS test_generate_sheet_mapping_override")
+
+
+def test_generate_conflict_raises():
+    template, data, out = _build_formula_fixture()
+    data2 = os.path.join(TEST_DIR, '_tmp_data2.xlsx')
+    wb = openpyxl.Workbook(); wb.active.title = 'Src'
+    wb.save(data2); wb.close()
+    try:
+        generate_formulas_from_template(
+            template_file=template, template_sheet='结果',
+            data_files=[data, data2], output_file=out,  # 不传 sheet_mapping → 冲突
+        )
+        assert False, "应抛错"
+    except ValueError as e:
+        assert 'Src' in str(e)
+    finally:
+        for p in (template, data, data2):
+            if os.path.exists(p):
+                os.remove(p)
+        if os.path.exists(out):
+            os.remove(out)
+    print("PASS test_generate_conflict_raises")
+
+
+def test_generate_multi_formula_columns_row_offset():
+    template = os.path.join(TEST_DIR, '_tmp_tpl2.xlsx')
+    data = os.path.join(TEST_DIR, '_tmp_data3.xlsx')
+    out = os.path.join(TEST_DIR, '_tmp_out2.xlsx')
+    wb = openpyxl.Workbook(); wb.active.title = '结果'
+    ws = wb['结果']
+    ws.cell(row=1, column=1, value='甲'); ws.cell(row=1, column=2, value='乙')
+    ws.cell(row=2, column=1, value='=Src!B2')
+    ws.cell(row=2, column=2, value='=Src!C2')
+    wb.save(template); wb.close()
+
+    wb = openpyxl.Workbook(); wb.active.title = 'Src'
+    wb['Src'].cell(row=1, column=2, value='h')
+    for i in range(3):
+        wb['Src'].cell(row=i + 2, column=2, value=i)
+        wb['Src'].cell(row=i + 2, column=3, value=i * 10)
+    wb.save(data); wb.close()
+
+    generate_formulas_from_template(
+        template_file=template, template_sheet='结果',
+        data_files=[data], output_file=out,
+    )
+    wb = openpyxl.load_workbook(out)
+    ws = wb['结果']
+    # 两列都写入,且第 3 行公式行偏移 +1
+    assert ws.cell(row=2, column=1).value == '=Src!B2'
+    assert ws.cell(row=3, column=1).value == '=Src!B3', ws.cell(row=3, column=1).value
+    assert ws.cell(row=2, column=2).value == '=Src!C2'
+    assert ws.cell(row=3, column=2).value == '=Src!C3', ws.cell(row=3, column=2).value
+    wb.close()
+    for p in (template, data, out):
+        os.remove(p)
+    print("PASS test_generate_multi_formula_columns_row_offset")
+
+
 if __name__ == '__main__':
     test_discover_file_sheets_lists_all()
     test_resolve_explicit_mapping_wins()
@@ -188,4 +286,8 @@ if __name__ == '__main__':
     test_row_source_most_referenced()
     test_row_source_fallback_first_file()
     test_generate_internal_happy_path()
+    test_generate_external_refs_mode()
+    test_generate_sheet_mapping_override()
+    test_generate_conflict_raises()
+    test_generate_multi_formula_columns_row_offset()
     print("all pass")
