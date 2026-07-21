@@ -44,6 +44,66 @@
   - 外部引用模式（`--external-refs`）：公式使用外部文件引用，数据与源文件保持链接
 - **公式仅数据源**：支持仅在公式中引用的数据源（无需列映射）
 
+## 模板公式专用生成模块 (`modules/template_formula.py`)
+
+> 与上面的「模板生成模块」**相互独立**。本模块**只输出公式列**,无需配置列映射,仅凭模板 + 数据文件路径即可生成。
+
+### 功能特点
+
+- **只输出公式列**:自动检测模板目标 sheet 中第 2 行以 `=` 开头的所有列,丢弃其余列。
+- **公式按数据行复制**:逐行套用公式模板并自动偏移行号。
+- **sheet 引用三层解析**(优先级从高到低):
+  1. 显式映射 `sheet_mapping`(你说了算)
+  2. 外部数据文件同名自动匹配
+  3. 模板自带 sheet
+- **两种引用模式**:默认内部(数据 sheet 复制进输出,自包含);`use_external_refs=True` 外部引用(与源文件活链接)。
+- **行数驱动**:可选 `row_source` 指定;不传则取公式中引用最多的数据 sheet。
+
+### 使用方法(命令行)
+
+```bash
+python main.py template-formula -t template.xlsx -ts 结果 \
+    -d data1.xlsx -d data2.xlsx \
+    --sheet-mapping "ESDP-Bpart:bpart.xlsx" \
+    --row-source "bpart.xlsx:ESDP-Bpart" \
+    -o result.xlsx
+```
+
+参数:
+
+| 参数 | 必需 | 说明 |
+|------|------|------|
+| `-t/--template` | 是 | 模板 Excel 路径 |
+| `-ts/--template-sheet` | 是 | 模板中含公式的目标工作表 |
+| `-d/--data-file` | 是 | 数据文件,可多次使用 |
+| `--sheet-mapping` | 否 | `公式sheet名:文件路径`,逗号分隔多条(显式覆盖) |
+| `--row-source` | 否 | `文件路径:sheet名`,行数驱动源 |
+| `-o/--output` | 否 | 输出文件(默认 output.xlsx) |
+| `--external-refs` | 否 | 使用外部文件引用(默认内部) |
+
+### 使用方法(导入)
+
+```python
+from modules.template_formula import generate_formulas_from_template
+
+result = generate_formulas_from_template(
+    template_file='template.xlsx',
+    template_sheet='结果',
+    data_files=['bpart.xlsx', 'cpart.xlsx'],
+    output_file='result.xlsx',
+    # sheet_mapping={'ESDP-Bpart': 'bpart.xlsx'},  # 可选
+    # row_source=('bpart.xlsx', 'ESDP-Bpart'),     # 可选
+)
+```
+
+### 与老模板生成模块的区别
+
+| 维度 | 模板生成模块(老) | 模板公式专用模块(新) |
+|------|-------------------|------------------------|
+| 入参 | 需逐个声明 sheet/列映射/alias | 只要文件路径 |
+| 输出 | 全部列 + 合并数据 | 仅公式列 |
+| 适用 | 需要数据列填充 | 只关心公式,数据仅作引用源 |
+
 ## 安装要求
 
 ```bash

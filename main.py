@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from modules.validation import process_excel_with_validation
 from modules.merge import merge_excel_tables
 from modules.template_generator import generate_excel_from_template, parse_column_mappings
+from modules.template_formula import generate_formulas_from_template
 
 
 def run_validation(args):
@@ -176,6 +177,47 @@ def run_template(args):
         sys.exit(1)
 
 
+def parse_sheet_mapping(mapping_str):
+    """解析 'sheet名:文件路径,sheet名:文件路径' → dict(按第一个冒号切分)。"""
+    if not mapping_str:
+        return None
+    result = {}
+    for pair in mapping_str.split(','):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if ':' not in pair:
+            raise ValueError(f"sheet_mapping 格式错误(应为 sheet名:文件路径): {pair}")
+        k, v = pair.split(':', 1)
+        result[k.strip()] = v.strip()
+    return result
+
+
+def run_template_formula(args):
+    """运行模板公式专用生成"""
+    print("=== 模板公式生成模式 ===\n")
+    try:
+        sheet_mapping = parse_sheet_mapping(args.sheet_mapping)
+        row_source = tuple(args.row_source.split(':', 1)) if args.row_source else None
+
+        result = generate_formulas_from_template(
+            template_file=args.template,
+            template_sheet=args.template_sheet,
+            data_files=args.data_file,
+            output_file=args.output,
+            sheet_mapping=sheet_mapping,
+            row_source=row_source,
+            use_external_refs=args.external_refs,
+        )
+        print("\n生成完成!")
+        print(f"输出文件: {args.output}")
+        print("\n生成结果:")
+        print(result)
+    except Exception as e:
+        print(f"\n❌ 生成失败: {e}")
+        sys.exit(1)
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
@@ -242,6 +284,17 @@ def main():
                                   help='使用外部文件引用公式，不复制数据源sheet（需Excel打开才能正常显示）')
     template_parser.add_argument('--primary-column', help='主键列名。当此列的值为空时，该行不会被添加到输出文件中')
 
+    # 模板公式生成命令
+    formula_parser = subparsers.add_parser('template-formula', help='基于模板生成只含公式列的Excel')
+    formula_parser.add_argument('-t', '--template', required=True, help='模板Excel文件路径')
+    formula_parser.add_argument('-ts', '--template-sheet', required=True, help='模板中含公式的目标工作表')
+    formula_parser.add_argument('-d', '--data-file', action='append', required=True,
+                                metavar='FILE', help='数据文件(可多次使用)')
+    formula_parser.add_argument('--sheet-mapping', help='公式sheet名:文件路径,逗号分隔多条')
+    formula_parser.add_argument('--row-source', help='文件路径:sheet名,指定行数驱动源')
+    formula_parser.add_argument('-o', '--output', default='output.xlsx', help='输出文件名')
+    formula_parser.add_argument('--external-refs', action='store_true', help='使用外部文件引用(默认内部)')
+
     # 解析参数
     args = parser.parse_args()
 
@@ -252,6 +305,8 @@ def main():
         run_merge(args)
     elif args.command == 'template':
         run_template(args)
+    elif args.command == 'template-formula':
+        run_template_formula(args)
     else:
         parser.print_help()
 

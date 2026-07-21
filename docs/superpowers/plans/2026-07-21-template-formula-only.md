@@ -18,9 +18,10 @@ python tests/template/test_template_generator.py
 python tests/template/test_complex_formula.py
 python tests/template/test_real_sheet_name.py
 python tests/template/test_bracket_format.py
-python tests/template/test_bracket_actual.py
 python tests/template/test_file_path_in_formula.py
 ```
+
+> 注:`test_bracket_actual.py` 在 main 上即存在多处语法错误、从未跑通(与本特性无关),已排除出回归网。
 
 ---
 
@@ -49,7 +50,6 @@ python tests/template/test_template_generator.py && \
 python tests/template/test_complex_formula.py && \
 python tests/template/test_real_sheet_name.py && \
 python tests/template/test_bracket_format.py && \
-python tests/template/test_bracket_actual.py && \
 python tests/template/test_file_path_in_formula.py
 ```
 Expected: 全部打印通过(各脚本以 exit 0 结束、无 AssertionError)。
@@ -167,7 +167,7 @@ Expected: 打印 `ok`,无 NameError。
 
 - [ ] **Step 4: 跑回归测试,必须全绿**
 
-Run(同 Task 1 Step 1 的 6 条命令)。
+Run(同 Task 1 Step 1 的 5 条命令)。
 Expected: 与基线一致,全部通过。若有失败,通常是漏删/漏 import 某符号——根据报错补到 Step 1 的 import 列表。
 
 - [ ] **Step 5: Commit**
@@ -800,7 +800,7 @@ Expected: 全部 PASS(含 happy path)。若 happy path 的公式断言不符(如
 
 - [ ] **Step 5: 跑回归测试,确保老方法未受影响**
 
-Run: Task 1 的 6 条命令。
+Run: Task 1 的 5 条命令。
 Expected: 全绿。
 
 - [ ] **Step 6: Commit**
@@ -1066,7 +1066,7 @@ Run: `rm -f tests/template/_cli_tpl.xlsx tests/template/_cli_data.xlsx tests/tem
 
 - [ ] **Step 5: 跑回归测试**
 
-Run: Task 1 的 6 条命令 + `python tests/template/test_template_formula.py`。
+Run: Task 1 的 5 条命令 + `python tests/template/test_template_formula.py`。
 Expected: 全绿。
 
 - [ ] **Step 6: Commit**
@@ -1166,6 +1166,6 @@ git commit -m "docs: 新增模板公式专用生成模块说明"
 
 - [ ] 所有 Task 的 checkbox 勾完。
 - [ ] `python tests/template/test_template_formula.py` 全绿。
-- [ ] Task 1 的 6 条回归测试全绿(老方法零回归)。
+- [ ] Task 1 的 5 条回归测试全绿(老方法零回归)。
 - [ ] CLI `python main.py template-formula -h` 正常显示帮助。
 - [ ] `modules/template_generator.py` 行数较抽取前明显下降;`modules/template_formula.py` 与之物理分离,互不 import。
